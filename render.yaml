@@ -1,0 +1,25 @@
+# Bauplan für Render.com – erlaubt die Einrichtung komplett vom Handy aus.
+# In Render: New → Blueprint → dieses Repository wählen → Apply.
+services:
+  - type: web
+    name: schulcloud-dashboard
+    runtime: python
+    plan: free
+    branch: claude/schulcloud-dashboard-y2fwoc
+    buildCommand: pip install -r requirements.txt
+    # Ein Worker: die angemeldete Sitzung liegt im Arbeitsspeicher des Prozesses.
+    startCommand: gunicorn --workers 1 --threads 4 --bind 0.0.0.0:$PORT app:app
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: SECRET_KEY
+        generateValue: true          # wird von Render erzeugt und bleibt bestehen
+      - key: SC_DASHBOARD_PIN
+        sync: false                  # wird beim Einrichten abgefragt (PIN wählen!)
+      - key: SC_BASE_URL
+        value: https://brandenburg.cloud
+      - key: SC_REFRESH_MINUTES
+        value: "15"
+      - key: SC_PERSIST_SESSION
+        value: "1"                   # Anmeldung übersteht Neustarts des Servers

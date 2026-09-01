@@ -5,6 +5,8 @@ Start:  python app.py     ->  http://127.0.0.1:5000
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
 import secrets
@@ -34,6 +36,10 @@ DEMO_MODE = os.getenv("SC_DEMO", "0") == "1"
 # Optionaler Zugriffsschutz des Dashboards selbst - noetig, sobald der Server
 # nicht nur auf 127.0.0.1 lauscht (Handy im gleichen WLAN, eigener Server).
 DASHBOARD_PIN = os.getenv("SC_DASHBOARD_PIN", "").strip()
+# Haelt die Anmeldung ueber Neustarts hinweg. Das Sitzungs-Token wird dafuer
+# verschluesselt im (signierten) Cookie des Browsers abgelegt - nicht auf dem
+# Server. Sinnvoll beim Hosting, wo der Prozess jederzeit neu startet.
+PERSIST_SESSION = os.getenv("SC_PERSIST_SESSION", "0") == "1"
 DB_PATH = os.getenv("SC_DB_PATH", "data/dashboard.sqlite3")
 
 app = Flask(__name__)
@@ -56,10 +62,77 @@ def _sid() -> Optional[str]:
     return session.get("sid")
 
 
+def _box() -> "Fernet":
+    """Schluessel fuer das Sitzungs-Token, abgeleitet aus dem SECRET_KEY."""
+    from cryptography.fernet import Fernet
+
+    digest = hashlib.sha256(app.secret_key.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def _seal(value: str) -> str:
+    return _box().encrypt(value.encode("utf-8")).decode("ascii")
+
+
+def _unseal(blob: str) -> Optional[str]:
+    from cryptography.fernet import InvalidToken
+
+    try:
+        return _box().decrypt(blob.encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError, TypeError):
+        return None
+
+
+def _remember(entry: dict[str, Any]) -> None:
+    """Legt das Noetige ins Cookie, um die Sitzung spaeter wiederherzustellen."""
+    if not PERSIST_SESSION:
+        return
+    if entry["mode"] == "demo":
+        session["demo"] = True
+        session.permanent = True
+        return
+    client = entry.get("client")
+    if client is not None and client.jwt:
+        session["tok"] = _seal(client.jwt)
+        session.permanent = True
+
+
+def _restore_session() -> Optional[dict[str, Any]]:
+    """Baut die Sitzung nach einem Neustart aus dem Cookie wieder auf."""
+    if not PERSIST_SESSION:
+        return None
+
+    if session.get("demo"):
+        entry = _new_session(None, demo_data.demo_user(), "demo")
+        sync(entry)
+        return entry
+
+    blob = session.get("tok")
+    token = _unseal(blob) if blob else None
+    if not token:
+        return None
+
+    client = SchulCloudClient(BASE_URL, API_URL)
+    try:
+        user = client.login_with_jwt(token)
+    except SchulCloudError:
+        session.pop("tok", None)  # Token abgelaufen oder ungueltig
+        return None
+
+    entry = _new_session(client, user, "live")
+    try:
+        sync(entry)
+    except SchulCloudError:
+        log.warning("Wiederhergestellte Sitzung konnte keine Daten laden.")
+    return entry
+
+
 def current_session(required: bool = True) -> Optional[dict[str, Any]]:
     sid = _sid()
     with SESSION_LOCK:
         entry = SESSIONS.get(sid) if sid else None
+    if entry is None:
+        entry = _restore_session()
     if entry is None and required:
         raise AuthError("Nicht angemeldet.")
     return entry
@@ -307,6 +380,7 @@ def api_login():
     if want_demo or (DEMO_MODE and not username and not jwt):
         entry = _new_session(None, demo_data.demo_user(), "demo")
         sync(entry)
+        _remember(entry)
         return jsonify({"ok": True, "user": _display_name(entry["user"]), "mode": "demo"})
 
     client = SchulCloudClient(BASE_URL, API_URL)
@@ -327,6 +401,7 @@ def api_login():
         sync(entry)
     except AuthError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 401
+    _remember(entry)
     return jsonify({"ok": True, "user": _display_name(user), "mode": "live", "strategy": client.strategy})
 
 
@@ -337,7 +412,7 @@ def api_logout():
         entry = SESSIONS.pop(sid, None) if sid else None
     if entry and entry.get("client"):
         entry["client"].logout()
-    session.clear()
+    session.clear()  # entfernt auch das gemerkte Sitzungs-Token
     return jsonify({"ok": True})
 
 
@@ -369,6 +444,28 @@ def api_set_done(item_id: str):
     store.set_done(item_id, done)
     entry = current_session(required=False) or {"mode": "cache"}
     return jsonify({"ok": True, "item_id": item_id, "done": done, **view_items(entry)})
+
+
+@app.post("/api/items/state/bulk")
+def api_bulk_state():
+    """Spiegelt den Abhak-Stand des Browsers zurueck auf den Server.
+
+    Beim Hosting auf kostenlosen Angeboten ist der Speicher des Servers
+    fluechtig: nach einem Neustart waeren alle Haken weg. Das Handy hält
+    deshalb eine eigene Kopie und meldet sie hier wieder an.
+    """
+    payload = request.get_json(silent=True) or {}
+    done_ids = [str(i) for i in (payload.get("done") or [])][:500]
+
+    states = store.states()
+    restored = 0
+    for item_id in done_ids:
+        if not states.get(item_id, {}).get("done"):
+            store.set_done(item_id, True)
+            restored += 1
+
+    entry = current_session(required=False) or {"mode": "cache"}
+    return jsonify({"ok": True, "restored": restored, **view_items(entry)})
 
 
 @app.post("/api/items/<path:item_id>/note")

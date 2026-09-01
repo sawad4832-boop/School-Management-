@@ -6,7 +6,7 @@ sortiert und eine eigene Abhak-Funktion mit Archiv bereitstellt.
 
 Die Oberfläche ist fürs Handy gebaut: große Tippflächen, „Rückgängig" nach dem
 Abhaken, Installation auf dem Homebildschirm und eine Liste, die auch ohne
-Verbindung noch den letzten Stand zeigt. → [Abschnitt 2: Auf dem Handy benutzen](#2-auf-dem-handy-benutzen)
+Verbindung noch den letzten Stand zeigt. → [Abschnitt 1: Online stellen für die Handy-Nutzung](#1-ohne-eigenen-computer-online-stellen-für-handy-nutzung)
 
 **Backend:** Python 3.9+ / Flask · **Frontend:** HTML + Tailwind CSS + Vanilla JS ·
 **Speicher:** SQLite (nur lokal)
@@ -15,35 +15,55 @@ Verbindung noch den letzten Stand zeigt. → [Abschnitt 2: Auf dem Handy benutze
 
 ---
 
-## 1. Wichtig vorab: `http://127.0.0.1:5000` ist *dein* Rechner
-
-`127.0.0.1` (= `localhost`) bedeutet immer „das Gerät, auf dem der Browser läuft".
-Der Link funktioniert also **nur, während das Programm auf genau diesem Gerät läuft**.
-Wenn Safari „Server nicht gefunden" oder „Verbindung fehlgeschlagen" meldet, ist der
-Server bei dir schlicht nicht gestartet. Es gibt keine Internetadresse, unter der das
-Dashboard ohne eigene Installation erreichbar wäre – und das ist Absicht: So bleiben
-Zugangsdaten und Aufgaben auf deinem Gerät.
-
-## 2. Auf dem Handy benutzen
+## 1. Ohne eigenen Computer: online stellen (für Handy-Nutzung)
 
 <img src="docs/screenshot-mobile.png" alt="Dashboard auf dem iPhone" width="300">
 
-Das Dashboard ist eine Web-App: Sie braucht einen laufenden Server. Auf dem iPhone
-selbst lässt sich keiner installieren – der Server läuft auf deinem Mac, das Handy
-öffnet ihn übers WLAN.
+Wer nur ein Handy hat, kann das Dashboard bei einem Hoster laufen lassen und es
+danach jederzeit im Safari öffnen. Die Einrichtung geht komplett am Handy, dauert
+etwa fünf Minuten und kostet nichts. Im Projekt liegt dafür ein fertiger Bauplan
+(`render.yaml`).
 
-**Einmalig einrichten** (auf dem Mac, nach der Installation aus Abschnitt 3):
+1. **render.com** im Safari öffnen → **Get Started** → **Sign in with GitHub**
+   (dasselbe GitHub-Konto, in dem dieses Projekt liegt).
+2. Oben auf **New +** → **Blueprint**.
+3. Das Repository **School-Management-** auswählen. Der Bauplan wird automatisch
+   gefunden; er zeigt auf den Branch `claude/schulcloud-dashboard-y2fwoc`.
+4. Render fragt nach **SC_DASHBOARD_PIN** – hier eine selbst ausgedachte Zahl
+   eintragen (4–6 Ziffern). Sie schützt die Seite, damit niemand sonst deine
+   Aufgaben sieht.
+5. **Apply** drücken und zwei bis drei Minuten warten, bis „Live" erscheint.
+6. Die angezeigte Adresse öffnen (etwa `https://schulcloud-dashboard-xxxx.onrender.com`):
+   erst die PIN, dann die Schul-Cloud-Zugangsdaten eingeben.
+7. In Safari unten auf **Teilen** → **Zum Home-Bildschirm**. Fertig – ab jetzt
+   liegt „Aufgaben" als App auf dem Homebildschirm.
 
-1. **PIN vergeben.** Sobald der Server im WLAN erreichbar ist, kommt jedes Gerät im
-   Netz an deine Aufgabenliste. In der `.env` deshalb setzen:
-   ```
-   SC_DASHBOARD_PIN=1234
-   ```
-2. **Für das Netzwerk starten:**
-   ```bash
-   HOST=0.0.0.0 ./run.sh
-   ```
-   Im Terminal erscheint die WLAN-Adresse **und ein QR-Code**:
+**Was du dabei wissen solltest**
+
+* Der Gratis-Plan legt den Server nach 15 Minuten ohne Zugriff schlafen. Der erste
+  Aufruf danach dauert etwa eine Minute, danach ist es wieder flott.
+* Die Anmeldung bleibt über solche Pausen hinweg bestehen: Das Sitzungs-Token liegt
+  verschlüsselt im Cookie deines Handys, nicht auf dem Server. Läuft es ab, kommt
+  einmal wieder die Anmeldemaske.
+* Deine Haken speichert zusätzlich dein Handy selbst und meldet sie dem Server
+  nach – der Gratis-Plan hat keinen dauerhaften Speicher.
+* Render liefert die Seite über HTTPS aus. Das ist Pflicht, weil dein Passwort
+  darüber läuft.
+* Ehrlich benannt: Bei diesem Weg läuft der Server bei einem fremden Anbieter, und
+  deine Schul-Cloud-Sitzung wird dort verarbeitet. Wer das nicht möchte, nimmt
+  Abschnitt 2 (eigenes WLAN) oder betreibt das `Dockerfile` auf einem eigenen Gerät.
+
+---
+
+## 2. Alternative: im eigenen WLAN (mit Mac oder PC)
+
+`http://127.0.0.1:5000` bedeutet immer „das Gerät, auf dem der Browser läuft". Der
+Link funktioniert also nur, während das Programm auf genau diesem Gerät läuft – ein
+Handy erreicht ihn nicht. Wer einen Rechner hat, kann ihn aber im WLAN freigeben:
+
+1. In der `.env` eine PIN setzen: `SC_DASHBOARD_PIN=1234`
+2. Starten mit `HOST=0.0.0.0 ./run.sh`
+3. Das Terminal zeigt die WLAN-Adresse **und einen QR-Code**:
    ```
    → Auf diesem Rechner:  http://127.0.0.1:5000
    → Im gleichen WLAN:    http://192.168.2.31:5000
@@ -53,39 +73,16 @@ selbst lässt sich keiner installieren – der Server läuft auf deinem Mac, das
      █ ▄▄▄ █ █ ▄▄▀█▄ ▄ █ ▄▄▄ █
      …
    ```
-3. **Am iPhone** die Kamera auf den QR-Code halten und auf die Benachrichtigung
-   tippen – Safari öffnet das Dashboard. PIN eingeben, dann anmelden.
-4. **Als App ablegen:** in Safari unten auf **Teilen** → **Zum Home-Bildschirm**.
-   Danach liegt „Aufgaben" mit eigenem Symbol auf dem Homebildschirm und startet
-   im Vollbild, ohne Safari-Leisten.
+4. QR-Code mit der Handykamera scannen, PIN eingeben, anmelden. Auch hier lässt
+   sich die Seite über **Teilen → Zum Home-Bildschirm** ablegen.
 
-**Was das Handy dann kann**
+Das funktioniert nur, solange der Rechner läuft und beide Geräte im selben WLAN
+sind; in Schul- oder Gäste-WLANs sind Geräte oft voneinander abgeschirmt.
 
-* Abhaken mit großer Tippfläche, danach 5 Sekunden lang **„Rückgängig"** – falls
-  du danebengetippt hast.
-* Beim Zurückwechseln zur App werden die Daten automatisch neu geladen.
-* Ohne Verbindung erscheint der zuletzt geladene Stand statt einer leeren Seite.
-* Filterleiste (Alle / Dringend / Aufgaben / Tests) waagerecht mit dem Daumen scrollbar.
-
-**Die Grenzen ehrlich benannt**
-
-* Es funktioniert nur, **während der Mac läuft** und beide Geräte im selben WLAN sind.
-  Unterwegs oder bei ausgeschaltetem Mac kommt nichts an.
-* Im Schul- oder Gäste-WLAN sind Geräte oft voneinander abgeschirmt; dann klappt es dort nicht.
-* Die IP-Adresse kann sich nach einem Neustart des Routers ändern – dann den QR-Code
-  neu scannen.
-
-**Wenn es unterwegs immer laufen soll**, muss der Server dauerhaft irgendwo stehen –
-Raspberry Pi zu Hause oder ein kleiner Hoster. Dafür liegt ein `Dockerfile` bei:
-
-```bash
-docker build -t schulcloud-dashboard .
-docker run -p 5000:5000 --env-file .env -v "$PWD/data:/app/data" schulcloud-dashboard
-```
-
-Dann aber zwingend: **HTTPS davor**, `SC_DASHBOARD_PIN` gesetzt und ein fester
-`SECRET_KEY`. Ohne HTTPS gehen deine Schul-Cloud-Zugangsdaten im Klartext durchs Netz.
-(Nur ein Worker – die Sitzungen liegen absichtlich im Arbeitsspeicher.)
+**Auf dem Handy bedienbar** (bei beiden Wegen): große Tippfläche zum Abhaken mit
+5 Sekunden „Rückgängig", waagerecht scrollbare Filter, automatische Aktualisierung
+beim Zurückwechseln zur App und der zuletzt geladene Stand, wenn keine Verbindung
+besteht.
 
 ---
 
@@ -155,6 +152,7 @@ Ausgabe im Erfolgsfall:
 | `SC_INGEST_TOKEN` | Token für die Browser-Erweiterung (leer = `/api/ingest` aus) | leer |
 | `SC_DB_PATH` | Pfad der SQLite-Datei | `data/dashboard.sqlite3` |
 | `SC_DASHBOARD_PIN` | PIN-Schutz des Dashboards (Pflicht bei `HOST=0.0.0.0`) | leer |
+| `SC_PERSIST_SESSION` | Anmeldung übersteht Neustarts (Token verschlüsselt im Cookie) | `0` |
 | `SC_DEMO` | Demo-Modus | `0` |
 | `PORT` / `HOST` | Bindung des Servers | `5000` / `127.0.0.1` |
 
@@ -162,7 +160,7 @@ Ausgabe im Erfolgsfall:
 
 ```bash
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q     # 35 Tests: Client, Parsing, Store, HTTP-API, PWA
+.venv/bin/python -m pytest -q     # 39 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
 ```
 
 ---
@@ -290,7 +288,9 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
 | `GET /api/items` | aktive Liste + Archiv + Kennzahlen |
 | `POST /api/refresh` | Daten neu von der Schul-Cloud holen |
 | `POST /api/items/<id>/done` | `{done:true\|false}` – abhaken / zurückholen |
+| `POST /api/items/state/bulk` | Abhak-Stand des Browsers nachmelden |
 | `POST /api/items/<id>/note` | eigene Notiz speichern |
+| `POST /api/pin` | PIN prüfen (nur bei gesetztem `SC_DASHBOARD_PIN`) |
 | `POST /api/ingest` | Endpunkt der Browser-Erweiterung (Token nötig) |
 | `GET /api/health` | Health-Check |
 
@@ -311,8 +311,9 @@ schulcloud/netinfo.py     Zugriffsadressen + QR-Code fuer das Handy
 static/sw.js              Service Worker (Offline-Huelle)
 static/icons/             App-Symbole fuer den Homebildschirm
 Dockerfile                fuer den Dauerbetrieb auf einem eigenen Server
+render.yaml               Bauplan fuer die Einrichtung bei Render (vom Handy aus)
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite (35 Tests)
+tests/                    pytest-Suite (39 Tests)
 ```
 
 ### Ohne CDN betreiben

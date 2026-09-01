@@ -150,18 +150,68 @@ def test_warns_when_tailwind_build_is_stale(client):
     import app as app_module
 
     template = os.path.join(app_module.app.template_folder, "index.html")
+    script = os.path.join(app_module.app.static_folder, "js", "app.js")
     css = os.path.join(app_module.app.static_folder, "css", "tailwind.css")
-    original = os.stat(template).st_mtime
+    originals = {path: os.stat(path).st_mtime for path in (template, script, css)}
+    base = min(originals.values())
 
     try:
-        # Build neuer als die Oberflaeche -> keine Warnung
-        os.utime(template, (original, original))
-        os.utime(css, (original + 60, original + 60))
+        # Build neuer als beide Quellen -> keine Warnung
+        for path in (template, script):
+            os.utime(path, (base, base))
+        os.utime(css, (base + 60, base + 60))
         assert app_module.warn_if_css_outdated() is None
 
-        # Oberflaeche neuer als der Build -> Warnung mit Bauanleitung
-        os.utime(template, (original + 120, original + 120))
+        # Eine Quelle neuer als der Build -> Warnung mit Bauanleitung
+        os.utime(template, (base + 120, base + 120))
         assert "tailwindcss" in app_module.warn_if_css_outdated()
     finally:
-        os.utime(template, (original, original))
-        os.utime(css, None)
+        for path, mtime in originals.items():
+            os.utime(path, (mtime, mtime))
+
+
+# ----------------------------------------------------------------------
+# Betrieb auf einem Hoster: Sitzung und Haken ueberstehen Neustarts
+# ----------------------------------------------------------------------
+def test_sealed_token_roundtrip(client):
+    import app as app_module
+
+    sealed = app_module._seal("mein-jwt")
+    assert sealed != "mein-jwt"
+    assert app_module._unseal(sealed) == "mein-jwt"
+    assert app_module._unseal("kaputt") is None
+
+
+def test_demo_session_survives_restart(client, monkeypatch):
+    """Nach einem Neustart ist der Arbeitsspeicher leer - das Cookie rettet die Sitzung."""
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "PERSIST_SESSION", True)
+    login_demo(client)
+    assert client.get("/api/items").get_json()["logged_in"] is True
+
+    app_module.SESSIONS.clear()  # entspricht einem Neustart des Servers
+    data = client.get("/api/items").get_json()
+    assert data["logged_in"] is True
+    assert data["stats"]["open"] >= 5
+
+
+def test_without_persistence_restart_logs_out(client):
+    login_demo(client)
+    import app as app_module
+
+    app_module.SESSIONS.clear()
+    assert client.get("/api/items").get_json()["logged_in"] is False
+
+
+def test_bulk_restores_checkmarks_after_data_loss(client):
+    """Der Browser meldet Haken nach, die der Server nicht mehr kennt."""
+    login_demo(client)
+    item_id = client.get("/api/items").get_json()["active"][0]["id"]
+
+    data = client.post("/api/items/state/bulk", json={"done": [item_id]}).get_json()
+    assert data["restored"] == 1
+    assert any(i["id"] == item_id and i["done"] for i in data["archive"])
+
+    # Nochmal dieselbe Meldung aendert nichts mehr
+    assert client.post("/api/items/state/bulk", json={"done": [item_id]}).get_json()["restored"] == 0

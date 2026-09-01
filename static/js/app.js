@@ -200,6 +200,43 @@ function applyPayload(data) {
   cacheOffline(data);
 }
 
+/* Eigene Kopie der Haken: Beim Hosting auf Gratis-Angeboten ist der Speicher
+   des Servers fluechtig - so ueberleben die Haken einen Neustart. */
+function localDone() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('sc-done') || '[]'));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function rememberDone(itemId, done) {
+  try {
+    const set = localDone();
+    if (done) set.add(itemId); else set.delete(itemId);
+    localStorage.setItem('sc-done', JSON.stringify([...set]));
+  } catch (_) { /* privater Modus o.ae. */ }
+}
+
+/* Fehlt dem Server ein Haken, den dieses Geraet kennt, wird er nachgereicht. */
+async function syncDoneState(data) {
+  const known = localDone();
+  if (!known.size) return data;
+
+  const serverDone = new Set((data.archive || []).filter((i) => i.done).map((i) => i.id));
+  const missing = [...known].filter((id) => !serverDone.has(id));
+  if (!missing.length) return data;
+
+  try {
+    return await api('/api/items/state/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ done: missing }),
+    });
+  } catch (_) {
+    return data;
+  }
+}
+
 /* Letzte Antwort lokal sichern, damit die Liste auch ohne Verbindung erscheint. */
 function cacheOffline(data) {
   try {
@@ -265,7 +302,8 @@ function showLogin() {
 }
 
 async function loadItems() {
-  applyPayload(await api('/api/items'));
+  const data = await api('/api/items');
+  applyPayload(await syncDoneState(data));
 }
 
 let refreshing = false;
@@ -287,6 +325,7 @@ async function refresh(silent = false) {
 }
 
 async function setDone(itemId, done, quiet = false) {
+  rememberDone(itemId, done);
   try {
     applyPayload(await api(`/api/items/${encodeURIComponent(itemId)}/done`, {
       method: 'POST',
