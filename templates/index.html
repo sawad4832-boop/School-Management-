@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="de" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Schul-Cloud Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128218;</text></svg>">
+  {% if local_css %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+  {% else %}
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: { colors: { ink: '#0f172a', surface: '#f8fafc' } } },
+    };
+  </script>
+  {% endif %}
+  <style>
+    [x-cloak] { display: none !important; }
+    .card-enter { animation: fade .25s ease-out; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  </style>
+</head>
+<body class="h-full bg-surface text-ink antialiased">
+
+<div id="app" class="min-h-full">
+
+  <!-- Kopfzeile -->
+  <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
+    <div class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
+      <div class="flex items-center gap-2">
+        <span class="grid h-9 w-9 place-items-center rounded-lg bg-ink text-sm font-bold text-white">SC</span>
+        <div>
+          <h1 class="text-base font-semibold leading-tight">Schul-Cloud Dashboard</h1>
+          <p class="text-xs text-slate-500" id="header-sub">{{ base_url }}</p>
+        </div>
+      </div>
+
+      <div class="ml-auto flex items-center gap-2">
+        <span id="sync-info" class="hidden text-xs text-slate-500 sm:inline"></span>
+        <button id="btn-refresh"
+                class="hidden rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-100 disabled:opacity-50">
+          Aktualisieren
+        </button>
+        <button id="btn-logout"
+                class="hidden rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100">
+          Abmelden
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-4 py-6">
+
+    <!-- Login -->
+    <section id="login-view" class="hidden">
+      <div class="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 class="text-lg font-semibold">Mit der Schul-Cloud verbinden</h2>
+        <p class="mt-1 text-sm text-slate-500">
+          Die Zugangsdaten werden ausschliesslich an <span class="font-medium">{{ base_url }}</span>
+          weitergereicht und nur im Arbeitsspeicher dieses lokalen Servers gehalten.
+        </p>
+
+        <form id="login-form" class="mt-5 space-y-3">
+          <div>
+            <label class="block text-sm font-medium" for="username">E-Mail / Benutzername</label>
+            <input id="username" name="username" type="text" autocomplete="username"
+                   class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-ink focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-sm font-medium" for="password">Passwort</label>
+            <input id="password" name="password" type="password" autocomplete="current-password"
+                   class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-ink focus:outline-none">
+          </div>
+
+          <details class="rounded-lg bg-slate-50 p-3 text-sm">
+            <summary class="cursor-pointer font-medium text-slate-700">
+              Alternative: Session-Token (JWT) aus dem Browser
+            </summary>
+            <p class="mt-2 text-xs text-slate-500">
+              Bei aktiver Zwei-Faktor-Anmeldung: in der Schul-Cloud anmelden, in den
+              Entwicklertools den Cookie <code>jwt</code> kopieren und hier einfuegen.
+              Die Browser-Erweiterung im Ordner <code>browser-extension/</code> erledigt das automatisch.
+            </p>
+            <textarea id="jwt" rows="3" placeholder="eyJhbGciOi..."
+                      class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"></textarea>
+          </details>
+
+          <p id="login-error" class="hidden rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+
+          <button type="submit" id="btn-login"
+                  class="w-full rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+            Anmelden
+          </button>
+          <button type="button" id="btn-demo"
+                  class="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100">
+            Demo-Daten ansehen
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="dash-view" class="hidden space-y-6">
+
+      <!-- Kennzahlen -->
+      <div id="stats" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"></div>
+
+      <div id="warnings" class="hidden rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"></div>
+
+      <!-- Filter -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex rounded-lg border border-slate-300 bg-white p-1 text-sm">
+          <button data-filter="all"      class="filter-btn rounded-md px-3 py-1 font-medium">Alle</button>
+          <button data-filter="homework" class="filter-btn rounded-md px-3 py-1 font-medium">Aufgaben</button>
+          <button data-filter="exam"     class="filter-btn rounded-md px-3 py-1 font-medium">Tests &amp; Arbeiten</button>
+          <button data-filter="urgent"   class="filter-btn rounded-md px-3 py-1 font-medium">Dringend</button>
+        </div>
+        <input id="search" type="search" placeholder="Suchen (Titel, Fach, Text) ..."
+               class="w-full max-w-xs rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-ink focus:outline-none">
+        <select id="course-filter" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm">
+          <option value="">Alle Kurse</option>
+        </select>
+      </div>
+
+      <!-- Aktive Liste -->
+      <div>
+        <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Offene To-dos</h2>
+        <ul id="active-list" class="space-y-3"></ul>
+        <p id="empty-active" class="hidden rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+          Nichts offen. Alles abgehakt!
+        </p>
+      </div>
+
+      <!-- Archiv -->
+      <div>
+        <button id="toggle-archive"
+                class="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-semibold hover:bg-slate-50">
+          <span>Archiv (erledigt &amp; bewertet)</span>
+          <span id="archive-count" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">0</span>
+        </button>
+        <ul id="archive-list" class="mt-3 hidden space-y-2"></ul>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="pointer-events-none fixed bottom-4 left-1/2 z-30 hidden -translate-x-1/2 rounded-lg bg-ink px-4 py-2 text-sm text-white shadow-lg"></div>
+</div>
+
+<script>
+  window.APP_CONFIG = {
+    baseUrl: "{{ base_url }}",
+    demoMode: {{ 'true' if demo_mode else 'false' }},
+    refreshMinutes: {{ refresh_minutes }},
+  };
+</script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

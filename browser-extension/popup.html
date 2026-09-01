@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font: 13px/1.4 system-ui, sans-serif; width: 300px; margin: 0; padding: 12px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    label { display: block; margin-top: 8px; font-weight: 600; }
+    input { width: 100%; box-sizing: border-box; padding: 5px 6px; margin-top: 2px; }
+    button { width: 100%; margin-top: 10px; padding: 7px; font-weight: 600; cursor: pointer; }
+    #status { margin-top: 8px; min-height: 16px; color: #334155; }
+  </style>
+</head>
+<body>
+  <h1>Schul-Cloud Dashboard</h1>
+  <label>Dashboard-URL<input id="dashboardUrl" value="http://127.0.0.1:5000"></label>
+  <label>Ingest-Token<input id="ingestToken" type="password"></label>
+  <label>Schul-Cloud-URL<input id="schulcloudUrl" value="https://brandenburg.cloud"></label>
+  <button id="save">Einstellungen speichern</button>
+  <button id="sync">Session &amp; Daten übertragen</button>
+  <button id="scrape">Sichtbare Aufgaben scrapen</button>
+  <p id="status"></p>
+  <script src="popup.js"></script>
+</body>
+</html>
