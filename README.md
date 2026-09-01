@@ -4,6 +4,10 @@ Ein Dashboard, das **auf deinem eigenen Rechner läuft** und Aufgaben, Abgabeter
 und Testankündigungen aus der Schul-Cloud Brandenburg einsammelt, nach Dringlichkeit
 sortiert und eine eigene Abhak-Funktion mit Archiv bereitstellt.
 
+Die Oberfläche ist fürs Handy gebaut: große Tippflächen, „Rückgängig" nach dem
+Abhaken, Installation auf dem Homebildschirm und eine Liste, die auch ohne
+Verbindung noch den letzten Stand zeigt. → [Abschnitt 2: Auf dem Handy benutzen](#2-auf-dem-handy-benutzen)
+
 **Backend:** Python 3.9+ / Flask · **Frontend:** HTML + Tailwind CSS + Vanilla JS ·
 **Speicher:** SQLite (nur lokal)
 
@@ -20,7 +24,72 @@ Server bei dir schlicht nicht gestartet. Es gibt keine Internetadresse, unter de
 Dashboard ohne eigene Installation erreichbar wäre – und das ist Absicht: So bleiben
 Zugangsdaten und Aufgaben auf deinem Gerät.
 
-## 2. Installation auf dem Mac (Schritt für Schritt)
+## 2. Auf dem Handy benutzen
+
+<img src="docs/screenshot-mobile.png" alt="Dashboard auf dem iPhone" width="300">
+
+Das Dashboard ist eine Web-App: Sie braucht einen laufenden Server. Auf dem iPhone
+selbst lässt sich keiner installieren – der Server läuft auf deinem Mac, das Handy
+öffnet ihn übers WLAN.
+
+**Einmalig einrichten** (auf dem Mac, nach der Installation aus Abschnitt 3):
+
+1. **PIN vergeben.** Sobald der Server im WLAN erreichbar ist, kommt jedes Gerät im
+   Netz an deine Aufgabenliste. In der `.env` deshalb setzen:
+   ```
+   SC_DASHBOARD_PIN=1234
+   ```
+2. **Für das Netzwerk starten:**
+   ```bash
+   HOST=0.0.0.0 ./run.sh
+   ```
+   Im Terminal erscheint die WLAN-Adresse **und ein QR-Code**:
+   ```
+   → Auf diesem Rechner:  http://127.0.0.1:5000
+   → Im gleichen WLAN:    http://192.168.2.31:5000
+
+     Mit der Handy-Kamera scannen:
+     ▄▄▄▄▄▄▄ ▄▄▄  ▄  ▄ ▄▄▄▄▄▄▄
+     █ ▄▄▄ █ █ ▄▄▀█▄ ▄ █ ▄▄▄ █
+     …
+   ```
+3. **Am iPhone** die Kamera auf den QR-Code halten und auf die Benachrichtigung
+   tippen – Safari öffnet das Dashboard. PIN eingeben, dann anmelden.
+4. **Als App ablegen:** in Safari unten auf **Teilen** → **Zum Home-Bildschirm**.
+   Danach liegt „Aufgaben" mit eigenem Symbol auf dem Homebildschirm und startet
+   im Vollbild, ohne Safari-Leisten.
+
+**Was das Handy dann kann**
+
+* Abhaken mit großer Tippfläche, danach 5 Sekunden lang **„Rückgängig"** – falls
+  du danebengetippt hast.
+* Beim Zurückwechseln zur App werden die Daten automatisch neu geladen.
+* Ohne Verbindung erscheint der zuletzt geladene Stand statt einer leeren Seite.
+* Filterleiste (Alle / Dringend / Aufgaben / Tests) waagerecht mit dem Daumen scrollbar.
+
+**Die Grenzen ehrlich benannt**
+
+* Es funktioniert nur, **während der Mac läuft** und beide Geräte im selben WLAN sind.
+  Unterwegs oder bei ausgeschaltetem Mac kommt nichts an.
+* Im Schul- oder Gäste-WLAN sind Geräte oft voneinander abgeschirmt; dann klappt es dort nicht.
+* Die IP-Adresse kann sich nach einem Neustart des Routers ändern – dann den QR-Code
+  neu scannen.
+
+**Wenn es unterwegs immer laufen soll**, muss der Server dauerhaft irgendwo stehen –
+Raspberry Pi zu Hause oder ein kleiner Hoster. Dafür liegt ein `Dockerfile` bei:
+
+```bash
+docker build -t schulcloud-dashboard .
+docker run -p 5000:5000 --env-file .env -v "$PWD/data:/app/data" schulcloud-dashboard
+```
+
+Dann aber zwingend: **HTTPS davor**, `SC_DASHBOARD_PIN` gesetzt und ein fester
+`SECRET_KEY`. Ohne HTTPS gehen deine Schul-Cloud-Zugangsdaten im Klartext durchs Netz.
+(Nur ein Worker – die Sitzungen liegen absichtlich im Arbeitsspeicher.)
+
+---
+
+## 3. Installation auf dem Mac (Schritt für Schritt)
 
 1. **Terminal öffnen** – ⌘ + Leertaste, „Terminal" eingeben, Enter.
 2. **Python prüfen:**
@@ -75,17 +144,6 @@ Ausgabe im Erfolgsfall:
   • verwendete Strategie: api
 ```
 
-### Auf dem iPhone/iPad benutzen
-
-Auf iOS lässt sich der Server nicht installieren. Zwei Wege:
-
-* **Im gleichen WLAN:** auf dem Mac `HOST=0.0.0.0 ./run.sh` starten. Das Skript zeigt
-  dann zusätzlich eine Adresse wie `http://192.168.2.31:5000`, die du am iPhone im
-  Safari öffnen kannst – solange der Mac läuft und beide im selben WLAN sind.
-  (Damit ist das Dashboard für alle Geräte im Netz erreichbar; nur im Heimnetz nutzen.)
-* **Dauerhaft:** auf einem kleinen Server/Raspberry Pi betreiben – dann aber unbedingt
-  HTTPS und ein zusätzliches Passwort davorschalten.
-
 ### Konfiguration (`.env`)
 
 | Variable | Bedeutung | Standard |
@@ -96,6 +154,7 @@ Auf iOS lässt sich der Server nicht installieren. Zwei Wege:
 | `SC_REFRESH_MINUTES` | Hintergrund-Aktualisierung (0 = aus) | `15` |
 | `SC_INGEST_TOKEN` | Token für die Browser-Erweiterung (leer = `/api/ingest` aus) | leer |
 | `SC_DB_PATH` | Pfad der SQLite-Datei | `data/dashboard.sqlite3` |
+| `SC_DASHBOARD_PIN` | PIN-Schutz des Dashboards (Pflicht bei `HOST=0.0.0.0`) | leer |
 | `SC_DEMO` | Demo-Modus | `0` |
 | `PORT` / `HOST` | Bindung des Servers | `5000` / `127.0.0.1` |
 
@@ -103,12 +162,12 @@ Auf iOS lässt sich der Server nicht installieren. Zwei Wege:
 
 ```bash
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q     # 28 Tests: Client, Parsing, Store, HTTP-API
+.venv/bin/python -m pytest -q     # 35 Tests: Client, Parsing, Store, HTTP-API, PWA
 ```
 
 ---
 
-## 3. Anmeldung an der Schul-Cloud
+## 4. Anmeldung an der Schul-Cloud
 
 Es gibt **keine offizielle öffentliche API**. Die folgenden Endpunkte wurden gegen
 `https://brandenburg.cloud` geprüft und werden vom Client verwendet:
@@ -159,7 +218,7 @@ unter „Alternative: Session-Token" einfügen – oder die Browser-Erweiterung 
 
 ---
 
-## 4. Browser-Erweiterung (Ordner `browser-extension/`)
+## 5. Browser-Erweiterung (Ordner `browser-extension/`)
 
 Für den Fall, dass der direkte Login nicht möglich ist (2FA, SSO): Die Erweiterung liest
 das Session-Cookie der bereits angemeldeten Schul-Cloud aus und schickt es an das lokale
@@ -180,7 +239,7 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
 
 ---
 
-## 5. Datenanalyse & Parsing
+## 6. Datenanalyse & Parsing
 
 `schulcloud/parser.py` normalisiert alle Quellen auf ein einheitliches Format:
 
@@ -207,7 +266,7 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
   Präsentation … Treffer erscheinen als Typ **„Test / Arbeit"**; gewöhnliche
   Stundenplan- und Schultermine werden bewusst ignoriert.
 
-## 6. Übersicht & Interaktivität
+## 7. Übersicht & Interaktivität
 
 * **Sortierung nach Dringlichkeit:** überfällig → < 24 h → < 48 h → diese Woche → später →
   ohne Termin, innerhalb einer Stufe nach Abgabezeitpunkt.
@@ -237,7 +296,7 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
 
 ---
 
-## 7. Projektstruktur
+## 8. Projektstruktur
 
 ```
 app.py                    Flask-App: Routen, Sessions, Hintergrund-Aktualisierung
@@ -248,22 +307,30 @@ schulcloud/check.py       Verbindungstest für die Kommandozeile
 schulcloud/demo.py        Beispieldaten für den Demo-Modus
 templates/index.html      Oberfläche (Tailwind)
 static/js/app.js          Frontend-Logik (Fetch + DOM)
+schulcloud/netinfo.py     Zugriffsadressen + QR-Code fuer das Handy
+static/sw.js              Service Worker (Offline-Huelle)
+static/icons/             App-Symbole fuer den Homebildschirm
+Dockerfile                fuer den Dauerbetrieb auf einem eigenen Server
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite (28 Tests)
+tests/                    pytest-Suite (35 Tests)
 ```
 
 ### Ohne CDN betreiben
 
 Die Seite lädt Tailwind über das CDN, ein lokaler Build wird aber automatisch bevorzugt
-(`static/css/tailwind.css` liegt bereits bei). Neu bauen:
+(`static/css/tailwind.css` liegt bereits bei). **Wer Template oder JavaScript ändert,
+muss ihn neu bauen** – er enthält nur die Klassen, die beim Bauen im Quelltext standen:
 
 ```bash
 npx tailwindcss -i static/css/input.css -o static/css/tailwind.css --minify
 ```
 
+Der Server warnt beim Start, wenn der Build älter als die Oberfläche ist. Alternativ
+`static/css/tailwind.css` löschen, dann wird wieder das CDN benutzt.
+
 ---
 
-## 8. Hinweise
+## 9. Hinweise
 
 * Das Tool ist ein privates Hilfsmittel für den **eigenen** Account und liest nur Daten,
   die dieser Account ohnehin im Browser sieht.

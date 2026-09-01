@@ -2,98 +2,134 @@
 <html lang="de" class="h-full">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Schul-Cloud Dashboard</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128218;</text></svg>">
+
+  <!-- Als App auf dem Homebildschirm -->
+  <link rel="manifest" href="{{ url_for('manifest') }}">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Aufgaben">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+
   {% if local_css %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
   {% else %}
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = {
-      theme: { extend: { colors: { ink: '#0f172a', surface: '#f8fafc' } } },
-    };
+    tailwind.config = { theme: { extend: { colors: { ink: '#0f172a', surface: '#f8fafc' } } } };
   </script>
   {% endif %}
+
   <style>
-    [x-cloak] { display: none !important; }
-    .card-enter { animation: fade .25s ease-out; }
+    /* Randbereiche des iPhones (Notch / Home-Indikator) freihalten */
+    .pt-safe { padding-top: env(safe-area-inset-top); }
+    .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+    .mb-safe { margin-bottom: calc(env(safe-area-inset-bottom) + 1rem); }
+
+    /* Waagerechte Leisten ohne sichtbaren Scrollbalken */
+    .no-bar { -ms-overflow-style: none; scrollbar-width: none; }
+    .no-bar::-webkit-scrollbar { display: none; }
+
+    .card-enter { animation: fade .2s ease-out; }
     @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+    /* Tippen soll nicht blau aufblitzen, Text nicht versehentlich markiert werden */
+    button { -webkit-tap-highlight-color: transparent; }
+    .no-select { -webkit-user-select: none; user-select: none; }
   </style>
 </head>
 <body class="h-full bg-surface text-ink antialiased">
 
-<div id="app" class="min-h-full">
+<div id="app" class="flex min-h-full flex-col">
 
   <!-- Kopfzeile -->
-  <header class="sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur">
-    <div class="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3">
-      <div class="flex items-center gap-2">
-        <span class="grid h-9 w-9 place-items-center rounded-lg bg-ink text-sm font-bold text-white">SC</span>
-        <div>
-          <h1 class="text-base font-semibold leading-tight">Schul-Cloud Dashboard</h1>
-          <p class="text-xs text-slate-500" id="header-sub">{{ base_url }}</p>
-        </div>
+  <header class="pt-safe sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+    <div class="mx-auto flex max-w-3xl items-center gap-3 px-4 py-2.5">
+      <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-ink text-xs font-bold text-white">SC</span>
+      <div class="min-w-0 flex-1">
+        <h1 class="truncate text-[15px] font-semibold leading-tight">Aufgaben</h1>
+        <p class="truncate text-xs text-slate-500" id="header-sub">{{ base_url }}</p>
       </div>
 
-      <div class="ml-auto flex items-center gap-2">
-        <span id="sync-info" class="hidden text-xs text-slate-500 sm:inline"></span>
-        <button id="btn-refresh"
-                class="hidden rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium hover:bg-slate-100 disabled:opacity-50">
-          Aktualisieren
-        </button>
-        <button id="btn-logout"
-                class="hidden rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100">
-          Abmelden
-        </button>
-      </div>
+      <button id="btn-refresh" title="Aktualisieren"
+              class="hidden h-10 w-10 shrink-0 place-items-center rounded-xl border border-slate-300 active:bg-slate-100">
+        <svg viewBox="0 0 20 20" class="h-5 w-5" fill="currentColor" id="refresh-icon">
+          <path d="M10 3a7 7 0 1 0 6.32 4h-2.2A5 5 0 1 1 10 5V8l4-3.5L10 1v2z"/>
+        </svg>
+      </button>
+      <button id="btn-logout" title="Abmelden"
+              class="hidden h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-500 active:bg-slate-100">
+        <svg viewBox="0 0 20 20" class="h-5 w-5" fill="currentColor">
+          <path d="M12 3H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h7v-2H5V5h7V3zm3.6 3.6L14.2 8l1 1H8v2h7.2l-1 1 1.4 1.4L19 10l-3.4-3.4z"/>
+        </svg>
+      </button>
     </div>
   </header>
 
-  <main class="mx-auto max-w-6xl px-4 py-6">
+  <main class="mx-auto w-full max-w-3xl flex-1 px-4 py-4">
+
+    <!-- PIN-Schutz (nur aktiv, wenn SC_DASHBOARD_PIN gesetzt ist) -->
+    <section id="pin-view" class="hidden">
+      <div class="mx-auto mt-8 max-w-xs rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+        <h2 class="text-lg font-semibold">PIN eingeben</h2>
+        <p class="mt-1 text-sm text-slate-500">Dieses Dashboard ist mit einer PIN geschützt.</p>
+        <form id="pin-form" class="mt-5 space-y-3">
+          <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+                 class="w-full rounded-xl border border-slate-300 px-3 py-3 text-center text-2xl tracking-[0.4em] focus:border-ink focus:outline-none">
+          <p id="pin-error" class="hidden rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+          <button type="submit"
+                  class="w-full rounded-xl bg-ink px-4 py-3.5 text-base font-semibold text-white active:bg-slate-700">
+            Weiter
+          </button>
+        </form>
+      </div>
+    </section>
 
     <!-- Login -->
     <section id="login-view" class="hidden">
-      <div class="mx-auto max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 class="text-lg font-semibold">Mit der Schul-Cloud verbinden</h2>
         <p class="mt-1 text-sm text-slate-500">
-          Die Zugangsdaten werden ausschliesslich an <span class="font-medium">{{ base_url }}</span>
-          weitergereicht und nur im Arbeitsspeicher dieses lokalen Servers gehalten.
+          Die Zugangsdaten gehen nur an <span class="font-medium">{{ base_url }}</span>
+          und werden nicht gespeichert.
         </p>
 
         <form id="login-form" class="mt-5 space-y-3">
           <div>
             <label class="block text-sm font-medium" for="username">E-Mail / Benutzername</label>
-            <input id="username" name="username" type="text" autocomplete="username"
-                   class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-ink focus:outline-none">
+            <input id="username" name="username" type="email" autocomplete="username"
+                   inputmode="email" autocapitalize="none" autocorrect="off"
+                   class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-3 text-base focus:border-ink focus:outline-none">
           </div>
           <div>
             <label class="block text-sm font-medium" for="password">Passwort</label>
             <input id="password" name="password" type="password" autocomplete="current-password"
-                   class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-ink focus:outline-none">
+                   class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-3 text-base focus:border-ink focus:outline-none">
           </div>
 
-          <details class="rounded-lg bg-slate-50 p-3 text-sm">
+          <details class="rounded-xl bg-slate-50 p-3 text-sm">
             <summary class="cursor-pointer font-medium text-slate-700">
-              Alternative: Session-Token (JWT) aus dem Browser
+              Alternative: Session-Token (JWT)
             </summary>
             <p class="mt-2 text-xs text-slate-500">
-              Bei aktiver Zwei-Faktor-Anmeldung: in der Schul-Cloud anmelden, in den
-              Entwicklertools den Cookie <code>jwt</code> kopieren und hier einfuegen.
-              Die Browser-Erweiterung im Ordner <code>browser-extension/</code> erledigt das automatisch.
+              Bei Zwei-Faktor-Anmeldung oder SSO: in der Schul-Cloud anmelden, den Cookie
+              <code>jwt</code> kopieren und hier einfügen.
             </p>
-            <textarea id="jwt" rows="3" placeholder="eyJhbGciOi..."
-                      class="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs"></textarea>
+            <textarea id="jwt" rows="3" placeholder="eyJhbGciOi…" autocapitalize="none" autocorrect="off"
+                      class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-xs"></textarea>
           </details>
 
-          <p id="login-error" class="hidden rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700"></p>
+          <p id="login-error" class="hidden rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700"></p>
 
           <button type="submit" id="btn-login"
-                  class="w-full rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                  class="w-full rounded-xl bg-ink px-4 py-3.5 text-base font-semibold text-white active:bg-slate-700 disabled:opacity-60">
             Anmelden
           </button>
           <button type="button" id="btn-demo"
-                  class="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-100">
+                  class="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium active:bg-slate-100">
             Demo-Daten ansehen
           </button>
         </form>
@@ -101,50 +137,60 @@
     </section>
 
     <!-- Dashboard -->
-    <section id="dash-view" class="hidden space-y-6">
+    <section id="dash-view" class="hidden">
 
-      <!-- Kennzahlen -->
-      <div id="stats" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6"></div>
+      <!-- Kennzahlen: auf dem Handy waagerecht scrollbar -->
+      <div id="stats" class="no-bar -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-6 sm:px-0"></div>
 
-      <div id="warnings" class="hidden rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"></div>
+      <div id="warnings" class="mt-3 hidden rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800"></div>
 
       <!-- Filter -->
-      <div class="flex flex-wrap items-center gap-2">
-        <div class="flex rounded-lg border border-slate-300 bg-white p-1 text-sm">
-          <button data-filter="all"      class="filter-btn rounded-md px-3 py-1 font-medium">Alle</button>
-          <button data-filter="homework" class="filter-btn rounded-md px-3 py-1 font-medium">Aufgaben</button>
-          <button data-filter="exam"     class="filter-btn rounded-md px-3 py-1 font-medium">Tests &amp; Arbeiten</button>
-          <button data-filter="urgent"   class="filter-btn rounded-md px-3 py-1 font-medium">Dringend</button>
-        </div>
-        <input id="search" type="search" placeholder="Suchen (Titel, Fach, Text) ..."
-               class="w-full max-w-xs rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:border-ink focus:outline-none">
-        <select id="course-filter" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm">
-          <option value="">Alle Kurse</option>
-        </select>
+      <div class="no-bar -mx-4 mt-3 flex gap-2 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <button data-filter="all"      class="filter-btn shrink-0 rounded-full px-4 py-2 text-sm font-medium">Alle</button>
+        <button data-filter="urgent"   class="filter-btn shrink-0 rounded-full px-4 py-2 text-sm font-medium">Dringend</button>
+        <button data-filter="homework" class="filter-btn shrink-0 rounded-full px-4 py-2 text-sm font-medium">Aufgaben</button>
+        <button data-filter="exam"     class="filter-btn shrink-0 rounded-full px-4 py-2 text-sm font-medium">Tests</button>
       </div>
+
+      <details id="more-filters" class="mt-3 rounded-xl border border-slate-200 bg-white">
+        <summary class="cursor-pointer px-4 py-2.5 text-sm font-medium text-slate-600">Suchen &amp; Kurs wählen</summary>
+        <div class="space-y-2 px-4 pb-4">
+          <input id="search" type="search" placeholder="Titel, Fach, Text …" enterkeyhint="search"
+                 class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-base focus:border-ink focus:outline-none">
+          <select id="course-filter" class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base">
+            <option value="">Alle Kurse</option>
+          </select>
+        </div>
+      </details>
 
       <!-- Aktive Liste -->
-      <div>
-        <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Offene To-dos</h2>
-        <ul id="active-list" class="space-y-3"></ul>
-        <p id="empty-active" class="hidden rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
-          Nichts offen. Alles abgehakt!
-        </p>
-      </div>
+      <h2 class="mb-2 mt-5 px-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Offene To-dos</h2>
+      <ul id="active-list" class="space-y-2.5"></ul>
+      <p id="empty-active" class="hidden rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">
+        Nichts offen. Alles abgehakt!
+      </p>
 
       <!-- Archiv -->
-      <div>
+      <div class="mb-safe mt-6">
         <button id="toggle-archive"
-                class="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-semibold hover:bg-slate-50">
+                class="flex w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3.5 text-left text-sm font-semibold active:bg-slate-50">
           <span>Archiv (erledigt &amp; bewertet)</span>
           <span id="archive-count" class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">0</span>
         </button>
-        <ul id="archive-list" class="mt-3 hidden space-y-2"></ul>
+        <ul id="archive-list" class="mt-2 hidden space-y-2"></ul>
       </div>
     </section>
   </main>
 
-  <div id="toast" class="pointer-events-none fixed bottom-4 left-1/2 z-30 hidden -translate-x-1/2 rounded-lg bg-ink px-4 py-2 text-sm text-white shadow-lg"></div>
+  <!-- Meldungen: sitzen ueber dem Home-Indikator und tragen den Rueckgaengig-Knopf -->
+  <div id="toast" class="pb-safe fixed inset-x-0 bottom-0 z-30 hidden px-4">
+    <div class="mx-auto flex max-w-md items-center gap-3 rounded-2xl bg-ink px-4 py-3 text-sm text-white shadow-lg">
+      <span id="toast-text" class="flex-1"></span>
+      <button id="toast-action" class="hidden shrink-0 rounded-lg bg-white/15 px-3 py-1.5 font-semibold active:bg-white/25">
+        Rückgängig
+      </button>
+    </div>
+  </div>
 </div>
 
 <script>

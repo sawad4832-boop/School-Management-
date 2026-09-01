@@ -98,3 +98,16 @@ def test_store_roundtrip(tmp_path):
 
     store.set_meta("last_sync", "2026-09-01T10:00:00+00:00")
     assert store.get_meta("last_sync").startswith("2026-09-01")
+
+
+def test_lan_report_and_qr():
+    from schulcloud.netinfo import qr_lines, report
+
+    text = report(5000, "127.0.0.1")
+    assert "http://127.0.0.1:5000" in text and "WLAN" not in text
+
+    lan = report(5000, "0.0.0.0")
+    assert "Im gleichen WLAN" in lan
+
+    code = qr_lines("http://192.168.0.5:5000")
+    assert code and all(len(line) == len(code[0]) for line in code)

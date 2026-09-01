@@ -1,4 +1,6 @@
-/* Schul-Cloud Dashboard - Frontend-Logik (ohne Framework, nur Fetch + DOM). */
+/* Schul-Cloud Dashboard – Frontend (ohne Framework, nur Fetch + DOM).
+   Auf Handybedienung ausgelegt: grosse Tippflaechen, Rueckgaengig nach dem
+   Abhaken, Aktualisierung beim Zurueckwechseln zur App. */
 'use strict';
 
 const state = {
@@ -12,6 +14,7 @@ const state = {
 };
 
 const el = (id) => document.getElementById(id);
+
 const api = async (path, options = {}) => {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -27,27 +30,26 @@ const api = async (path, options = {}) => {
 /* ---------------------------------------------------------------- Darstellung */
 
 const LEVELS = {
-  overdue:  { border: 'border-l-red-600',    chip: 'bg-red-100 text-red-800',       label: 'Überfällig' },
-  critical: { border: 'border-l-red-500',    chip: 'bg-red-100 text-red-700',       label: 'In 24 Stunden' },
-  warning:  { border: 'border-l-amber-500',  chip: 'bg-amber-100 text-amber-800',   label: 'In 48 Stunden' },
-  soon:     { border: 'border-l-yellow-400', chip: 'bg-yellow-100 text-yellow-800', label: 'Diese Woche' },
-  later:    { border: 'border-l-slate-300',  chip: 'bg-slate-100 text-slate-600',   label: 'Später' },
-  none:     { border: 'border-l-slate-200',  chip: 'bg-slate-100 text-slate-500',   label: 'Ohne Termin' },
+  overdue:  { bar: 'bg-red-600',    chip: 'bg-red-100 text-red-800' },
+  critical: { bar: 'bg-red-500',    chip: 'bg-red-100 text-red-700' },
+  warning:  { bar: 'bg-amber-500',  chip: 'bg-amber-100 text-amber-800' },
+  soon:     { bar: 'bg-yellow-400', chip: 'bg-yellow-100 text-yellow-800' },
+  later:    { bar: 'bg-slate-300',  chip: 'bg-slate-100 text-slate-600' },
+  none:     { bar: 'bg-slate-200',  chip: 'bg-slate-100 text-slate-500' },
 };
 
 const STATUS = {
-  open:      { text: 'Offen',      cls: 'bg-slate-100 text-slate-700' },
+  open:      { text: 'Offen',       cls: 'bg-slate-100 text-slate-700' },
   submitted: { text: 'Eingereicht', cls: 'bg-blue-100 text-blue-700' },
   graded:    { text: 'Bewertet',    cls: 'bg-emerald-100 text-emerald-700' },
 };
 
-function formatDue(iso) {
+function formatDue(iso, short = false) {
   if (!iso) return 'Kein Abgabetermin';
   const d = new Date(iso);
-  return d.toLocaleString('de-DE', {
-    weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  }) + ' Uhr';
+  return d.toLocaleString('de-DE', short
+    ? { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }
+    : { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(value) {
@@ -57,9 +59,9 @@ function escapeHtml(value) {
 }
 
 function statTile(label, value, tone) {
-  return `<div class="rounded-xl border border-slate-200 bg-white p-3">
-            <p class="text-xs font-medium text-slate-500">${label}</p>
-            <p class="mt-1 text-2xl font-semibold ${tone || ''}">${value}</p>
+  return `<div class="min-w-[7rem] shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 sm:min-w-0">
+            <p class="text-[11px] font-medium text-slate-500">${label}</p>
+            <p class="text-xl font-semibold ${tone || ''}">${value}</p>
           </div>`;
 }
 
@@ -67,10 +69,10 @@ function renderStats() {
   const s = state.stats || {};
   el('stats').innerHTML = [
     statTile('Offen', s.open ?? 0),
-    statTile('Überfällig', s.overdue ?? 0, (s.overdue ? 'text-red-600' : '')),
-    statTile('Nächste 24 h', s.next24h ?? 0, (s.next24h ? 'text-red-600' : '')),
-    statTile('Nächste 48 h', s.next48h ?? 0, (s.next48h ? 'text-amber-600' : '')),
-    statTile('Tests / Arbeiten', s.exams ?? 0, 'text-indigo-600'),
+    statTile('Überfällig', s.overdue ?? 0, s.overdue ? 'text-red-600' : ''),
+    statTile('Nächste 24 h', s.next24h ?? 0, s.next24h ? 'text-red-600' : ''),
+    statTile('Nächste 48 h', s.next48h ?? 0, s.next48h ? 'text-amber-600' : ''),
+    statTile('Tests', s.exams ?? 0, 'text-indigo-600'),
     statTile('Erledigt', s.done ?? 0, 'text-emerald-600'),
   ].join('');
 }
@@ -79,62 +81,62 @@ function itemCard(item) {
   const level = LEVELS[item.urgency?.level] || LEVELS.none;
   const status = STATUS[item.status] || STATUS.open;
   const kindBadge = item.kind === 'exam'
-    ? '<span class="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">Test / Arbeit</span>'
-    : '';
-  const grade = item.grade
-    ? `<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">Note: ${escapeHtml(item.grade)}</span>`
+    ? '<span class="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700">Test</span>'
     : '';
   const dot = item.color
-    ? `<span class="inline-block h-2.5 w-2.5 rounded-full" style="background:${escapeHtml(item.color)}"></span>`
+    ? `<span class="inline-block h-2 w-2 shrink-0 rounded-full" style="background:${escapeHtml(item.color)}"></span>`
     : '';
 
   return `
-  <li class="card-enter rounded-xl border border-slate-200 border-l-4 ${level.border} bg-white p-4 shadow-sm"
+  <li class="card-enter overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
       data-id="${escapeHtml(item.id)}">
-    <div class="flex items-start gap-3">
-      <button class="check-btn mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 border-slate-300 text-transparent transition hover:border-emerald-500 hover:text-emerald-600"
-              title="Als erledigt markieren" aria-label="Als erledigt markieren">
-        <svg viewBox="0 0 20 20" class="h-4 w-4" fill="currentColor">
-          <path d="M7.6 13.2 4.4 10l-1.1 1.1 4.3 4.3 9-9-1.1-1.1z"/>
-        </svg>
+    <div class="flex">
+      <span class="w-1.5 shrink-0 ${level.bar}"></span>
+
+      <!-- Abhaken: grosse Tippflaeche am linken Rand -->
+      <button class="check-btn no-select grid w-14 shrink-0 place-items-center active:bg-emerald-50"
+              aria-label="Als erledigt markieren">
+        <span class="grid h-7 w-7 place-items-center rounded-lg border-2 border-slate-300 text-transparent">
+          <svg viewBox="0 0 20 20" class="h-4 w-4" fill="currentColor">
+            <path d="M7.6 13.2 4.4 10l-1.1 1.1 4.3 4.3 9-9-1.1-1.1z"/>
+          </svg>
+        </span>
       </button>
 
-      <div class="min-w-0 flex-1">
-        <div class="flex flex-wrap items-center gap-2">
-          <h3 class="truncate text-sm font-semibold">${escapeHtml(item.title)}</h3>
+      <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener"
+         class="min-w-0 flex-1 py-3 pr-3 active:bg-slate-50">
+        <div class="flex flex-wrap items-center gap-1.5">
+          <h3 class="text-[15px] font-semibold leading-snug">${escapeHtml(item.title)}</h3>
           ${kindBadge}
-          <span class="rounded-full px-2 py-0.5 text-xs font-medium ${status.cls}">${status.text}</span>
-          ${grade}
+          <span class="rounded-full px-2 py-0.5 text-[11px] font-medium ${status.cls}">${status.text}</span>
         </div>
         <p class="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
-          ${dot}<span class="font-medium">${escapeHtml(item.course)}</span>
-          ${item.teacher ? '· ' + escapeHtml(item.teacher) : ''}
+          ${dot}<span class="truncate font-medium">${escapeHtml(item.course)}</span>
         </p>
-        ${item.description ? `<p class="mt-2 line-clamp-2 text-sm text-slate-600">${escapeHtml(item.description)}</p>` : ''}
-        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <span class="rounded-full px-2 py-0.5 font-medium ${level.chip}">${escapeHtml(item.urgency?.label || level.label)}</span>
-          <span class="text-slate-500">${formatDue(item.due)}</span>
-          <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener"
-             class="ml-auto font-medium text-slate-600 underline-offset-2 hover:underline">In der Schul-Cloud öffnen →</a>
+        <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <span class="rounded-full px-2 py-0.5 font-medium ${level.chip}">${escapeHtml(item.urgency?.label || '')}</span>
+          <span class="text-slate-500">${formatDue(item.due, true)}</span>
         </div>
-      </div>
+      </a>
     </div>
   </li>`;
 }
 
 function archiveCard(item) {
+  const restore = item.status === 'graded' && !item.done
+    ? '<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] text-emerald-700">bewertet</span>'
+    : '<button class="undo-btn shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium active:bg-slate-100">Zurückholen</button>';
+
   return `
-  <li class="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-2.5" data-id="${escapeHtml(item.id)}">
+  <li class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5" data-id="${escapeHtml(item.id)}">
     <svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-emerald-600" fill="currentColor">
       <path d="M7.6 13.2 4.4 10l-1.1 1.1 4.3 4.3 9-9-1.1-1.1z"/>
     </svg>
     <div class="min-w-0 flex-1">
       <p class="truncate text-sm font-medium text-slate-600 line-through">${escapeHtml(item.title)}</p>
-      <p class="text-xs text-slate-400">${escapeHtml(item.course)} · ${formatDue(item.due)}</p>
+      <p class="truncate text-xs text-slate-400">${escapeHtml(item.course)} · ${formatDue(item.due, true)}</p>
     </div>
-    ${item.status === 'graded' && !item.done
-      ? '<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">bewertet</span>'
-      : '<button class="undo-btn rounded-lg border border-slate-300 px-2 py-1 text-xs font-medium hover:bg-slate-100">Zurückholen</button>'}
+    ${restore}
   </li>`;
 }
 
@@ -177,13 +179,9 @@ function render() {
 
   document.querySelectorAll('.filter-btn').forEach((btn) => {
     const on = btn.dataset.filter === state.filter;
-    btn.className = `filter-btn rounded-md px-3 py-1 font-medium ${on ? 'bg-ink text-white' : 'text-slate-600 hover:bg-slate-100'}`;
+    btn.className = 'filter-btn shrink-0 rounded-full px-4 py-2 text-sm font-medium '
+      + (on ? 'bg-ink text-white' : 'border border-slate-300 bg-white text-slate-600');
   });
-
-  el('sync-info').textContent = state.lastSync
-    ? 'Stand: ' + new Date(state.lastSync).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-    : '';
-  el('sync-info').classList.toggle('hidden', !state.lastSync);
 }
 
 function applyPayload(data) {
@@ -193,35 +191,72 @@ function applyPayload(data) {
   state.lastSync = data.last_sync || state.lastSync;
 
   const box = el('warnings');
-  const warnings = data.warnings || [];
+  const warnings = [...(data.warnings || [])];
+  if (data.mode === 'demo') warnings.push('Demo-Modus: Die angezeigten Daten sind Beispieldaten.');
   box.classList.toggle('hidden', warnings.length === 0);
-  box.innerHTML = warnings.map((w) => `<p>⚠️ ${escapeHtml(w)}</p>`).join('')
-    + (data.mode === 'demo' ? '<p>ℹ️ Demo-Modus: Die angezeigten Daten sind Beispieldaten.</p>' : '');
-  if (data.mode === 'demo') box.classList.remove('hidden');
+  box.innerHTML = warnings.map((w) => `<p>${escapeHtml(w)}</p>`).join('');
 
   render();
+  cacheOffline(data);
 }
 
-function toast(message) {
-  const node = el('toast');
-  node.textContent = message;
-  node.classList.remove('hidden');
-  clearTimeout(node._timer);
-  node._timer = setTimeout(() => node.classList.add('hidden'), 2500);
+/* Letzte Antwort lokal sichern, damit die Liste auch ohne Verbindung erscheint. */
+function cacheOffline(data) {
+  try {
+    localStorage.setItem('sc-items', JSON.stringify({ ...data, cached_at: Date.now() }));
+  } catch (_) { /* privater Modus o.ae. */ }
+}
+
+function loadOffline() {
+  try {
+    const raw = localStorage.getItem('sc-items');
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    state.active = data.active || [];
+    state.archive = data.archive || [];
+    state.stats = data.stats || {};
+    state.lastSync = data.last_sync;
+    render();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+let toastTimer;
+function toast(message, undoAction) {
+  el('toast-text').textContent = message;
+  const action = el('toast-action');
+  action.classList.toggle('hidden', !undoAction);
+  action.onclick = undoAction ? () => { action.classList.add('hidden'); undoAction(); } : null;
+
+  el('toast').classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el('toast').classList.add('hidden'), undoAction ? 5000 : 2500);
 }
 
 /* ------------------------------------------------------------------- Aktionen */
 
 function showDashboard(status) {
+  el('pin-view').classList.add('hidden');
   el('login-view').classList.add('hidden');
   el('dash-view').classList.remove('hidden');
-  el('btn-refresh').classList.remove('hidden');
-  el('btn-logout').classList.remove('hidden');
-  el('header-sub').textContent = `${status.user || ''} · ${window.APP_CONFIG.baseUrl}`
-    + (status.mode === 'demo' ? ' · Demo' : '');
+  el('btn-refresh').classList.replace('hidden', 'grid');
+  el('btn-logout').classList.replace('hidden', 'grid');
+  el('header-sub').textContent = (status.user || '') + (status.mode === 'demo' ? ' · Demo' : '');
+}
+
+function showPin() {
+  el('dash-view').classList.add('hidden');
+  el('login-view').classList.add('hidden');
+  el('pin-view').classList.remove('hidden');
+  el('btn-refresh').classList.add('hidden');
+  el('btn-logout').classList.add('hidden');
+  el('pin').focus();
 }
 
 function showLogin() {
+  el('pin-view').classList.add('hidden');
   el('dash-view').classList.add('hidden');
   el('login-view').classList.remove('hidden');
   el('btn-refresh').classList.add('hidden');
@@ -230,35 +265,36 @@ function showLogin() {
 }
 
 async function loadItems() {
-  const data = await api('/api/items');
-  applyPayload(data);
+  applyPayload(await api('/api/items'));
 }
 
+let refreshing = false;
 async function refresh(silent = false) {
-  const btn = el('btn-refresh');
-  btn.disabled = true;
-  btn.textContent = 'Lädt ...';
+  if (refreshing) return;
+  refreshing = true;
+  el('refresh-icon').classList.add('animate-spin');
   try {
     applyPayload(await api('/api/refresh', { method: 'POST' }));
     if (!silent) toast('Daten aktualisiert');
   } catch (err) {
-    if (String(err.message).includes('angemeldet') || String(err.message).includes('abgelaufen')) {
-      showLogin();
-    }
-    toast('Fehler: ' + err.message);
+    const message = String(err.message);
+    if (message.includes('angemeldet') || message.includes('abgelaufen')) showLogin();
+    if (!silent) toast('Fehler: ' + message);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Aktualisieren';
+    refreshing = false;
+    el('refresh-icon').classList.remove('animate-spin');
   }
 }
 
-async function setDone(itemId, done) {
+async function setDone(itemId, done, quiet = false) {
   try {
     applyPayload(await api(`/api/items/${encodeURIComponent(itemId)}/done`, {
       method: 'POST',
       body: JSON.stringify({ done }),
     }));
-    toast(done ? 'Als erledigt abgehakt' : 'Zurück in die To-do-Liste');
+    if (quiet) return;
+    if (done) toast('Abgehakt', () => setDone(itemId, false, true));
+    else toast('Zurück in der To-do-Liste');
   } catch (err) {
     toast('Fehler: ' + err.message);
   }
@@ -273,7 +309,6 @@ async function login(payload) {
     const res = await api('/api/login', { method: 'POST', body: JSON.stringify(payload) });
     showDashboard(res);
     await loadItems();
-    toast('Angemeldet als ' + res.user);
   } catch (err) {
     error.textContent = err.message;
     error.classList.remove('hidden');
@@ -292,6 +327,26 @@ document.addEventListener('DOMContentLoaded', async () => {
       password: el('password').value,
       jwt: el('jwt').value,
     });
+  });
+
+  el('pin-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const error = el('pin-error');
+    error.classList.add('hidden');
+    try {
+      await api('/api/pin', { method: 'POST', body: JSON.stringify({ pin: el('pin').value }) });
+      el('pin').value = '';
+      const status = await api('/api/status');
+      if (status.logged_in) {
+        showDashboard(status);
+        await loadItems();
+      } else {
+        showLogin();
+      }
+    } catch (err) {
+      error.textContent = err.message;
+      error.classList.remove('hidden');
+    }
   });
 
   el('btn-demo').addEventListener('click', () => login({ demo: true }));
@@ -315,7 +370,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   el('active-list').addEventListener('click', (event) => {
     const btn = event.target.closest('.check-btn');
-    if (btn) setDone(btn.closest('li').dataset.id, true);
+    if (!btn) return;
+    event.preventDefault();
+    setDone(btn.closest('li').dataset.id, true);
   });
 
   el('archive-list').addEventListener('click', (event) => {
@@ -323,25 +380,45 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (btn) setDone(btn.closest('li').dataset.id, false);
   });
 
-  // Startzustand ermitteln
+  // Startzustand
   try {
     const status = await api('/api/status');
-    if (status.logged_in) {
+    if (status.pin_required) {
+      showPin();
+    } else if (status.logged_in) {
       showDashboard(status);
       await loadItems();
     } else {
       showLogin();
     }
   } catch (_) {
-    showLogin();
+    // Offline: letzte bekannte Liste zeigen, statt eine leere Seite
+    if (loadOffline()) {
+      showDashboard({ user: 'Offline – letzter Stand' });
+      toast('Keine Verbindung – letzter gespeicherter Stand');
+    } else {
+      showLogin();
+    }
   }
 
-  // Regelmaessig neu zeichnen (Countdown) und Daten nachladen.
-  setInterval(() => { if (state.active.length) loadItems().catch(() => {}); }, 60000);
+  // Beim Zurueckwechseln zur App aktualisieren (typisch auf dem Handy)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !el('dash-view').classList.contains('hidden')) {
+      refresh(true);
+    }
+  });
+
   const minutes = window.APP_CONFIG.refreshMinutes;
   if (minutes > 0) {
     setInterval(() => {
-      if (!el('dash-view').classList.contains('hidden')) refresh(true);
+      if (!el('dash-view').classList.contains('hidden') && document.visibilityState === 'visible') {
+        refresh(true);
+      }
     }, minutes * 60000);
+  }
+
+  // Service Worker nur in sicheren Kontexten (HTTPS oder localhost)
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
 });

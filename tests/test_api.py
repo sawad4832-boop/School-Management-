@@ -89,3 +89,79 @@ def test_index_page_renders(client):
     body = client.get("/").get_data(as_text=True)
     assert "Schul-Cloud Dashboard" in body
     assert "/static/js/app.js" in body
+
+
+# ----------------------------------------------------------------------
+# Handy-Betrieb: PWA-Dateien und PIN-Schutz
+# ----------------------------------------------------------------------
+def test_manifest_describes_installable_app(client):
+    data = client.get("/manifest.webmanifest").get_json()
+    assert data["display"] == "standalone"
+    assert data["start_url"] == "/"
+    assert {icon["sizes"] for icon in data["icons"]} == {"192x192", "512x512"}
+
+
+def test_service_worker_served_from_root(client):
+    res = client.get("/sw.js")
+    assert res.status_code == 200
+    assert "javascript" in res.headers["Content-Type"]
+
+
+def test_index_links_manifest_and_icons(client):
+    body = client.get("/").get_data(as_text=True)
+    assert "/manifest.webmanifest" in body
+    assert "apple-mobile-web-app-capable" in body
+    assert "viewport-fit=cover" in body
+
+
+@pytest.fixture()
+def pin_client(client, monkeypatch):
+    import app as app_module
+
+    monkeypatch.setattr(app_module, "DASHBOARD_PIN", "1234")
+    return client
+
+
+def test_pin_blocks_api_until_entered(pin_client):
+    status = pin_client.get("/api/status").get_json()
+    assert status["pin_required"] is True
+
+    blocked = pin_client.get("/api/items")
+    assert blocked.status_code == 401
+    assert blocked.get_json()["pin_required"] is True
+
+    assert pin_client.post("/api/pin", json={"pin": "0000"}).status_code == 401
+    assert pin_client.post("/api/pin", json={"pin": "1234"}).get_json()["ok"] is True
+
+    assert pin_client.get("/api/items").status_code == 200
+    assert pin_client.get("/api/status").get_json().get("pin_required") is None
+
+
+def test_pin_off_by_default(client):
+    assert client.get("/api/status").get_json().get("pin_required") is None
+    assert client.get("/api/items").status_code == 200
+
+
+def test_warns_when_tailwind_build_is_stale(client):
+    """Ein Build, der aelter als die Oberflaeche ist, muss auffallen."""
+    import os
+    import time
+
+    import app as app_module
+
+    template = os.path.join(app_module.app.template_folder, "index.html")
+    css = os.path.join(app_module.app.static_folder, "css", "tailwind.css")
+    original = os.stat(template).st_mtime
+
+    try:
+        # Build neuer als die Oberflaeche -> keine Warnung
+        os.utime(template, (original, original))
+        os.utime(css, (original + 60, original + 60))
+        assert app_module.warn_if_css_outdated() is None
+
+        # Oberflaeche neuer als der Build -> Warnung mit Bauanleitung
+        os.utime(template, (original + 120, original + 120))
+        assert "tailwindcss" in app_module.warn_if_css_outdated()
+    finally:
+        os.utime(template, (original, original))
+        os.utime(css, None)

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, session
+from flask import Flask, jsonify, render_template, request, send_from_directory, session
 
 from schulcloud import demo as demo_data
 from schulcloud import parser
@@ -31,6 +31,9 @@ API_URL = os.getenv("SC_API_URL") or None
 REFRESH_MINUTES = int(os.getenv("SC_REFRESH_MINUTES", "15") or 0)
 INGEST_TOKEN = os.getenv("SC_INGEST_TOKEN", "").strip()
 DEMO_MODE = os.getenv("SC_DEMO", "0") == "1"
+# Optionaler Zugriffsschutz des Dashboards selbst - noetig, sobald der Server
+# nicht nur auf 127.0.0.1 lauscht (Handy im gleichen WLAN, eigener Server).
+DASHBOARD_PIN = os.getenv("SC_DASHBOARD_PIN", "").strip()
 DB_PATH = os.getenv("SC_DB_PATH", "data/dashboard.sqlite3")
 
 app = Flask(__name__)
@@ -166,11 +169,103 @@ def _stats(active: list[dict], archive: list[dict]) -> dict[str, int]:
 # ----------------------------------------------------------------------
 # Routen
 # ----------------------------------------------------------------------
+# Routen, die auch ohne PIN erreichbar bleiben muessen.
+PIN_FREE_ENDPOINTS = {"index", "static", "manifest", "service_worker", "api_health", "api_pin", "api_status"}
+
+
+@app.before_request
+def require_pin():
+    """Sperrt die API, solange die PIN nicht eingegeben wurde."""
+    if not DASHBOARD_PIN or request.endpoint in PIN_FREE_ENDPOINTS:
+        return None
+    if not session.get("pin_ok"):
+        return jsonify({"ok": False, "error": "PIN erforderlich.", "pin_required": True}), 401
+    return None
+
+
+@app.post("/api/pin")
+def api_pin():
+    if not DASHBOARD_PIN:
+        return jsonify({"ok": True, "pin_required": False})
+
+    attempts = session.get("pin_attempts", 0)
+    if attempts >= 10:
+        return jsonify({"ok": False, "error": "Zu viele Fehlversuche. Server neu starten."}), 429
+
+    given = str((request.get_json(silent=True) or {}).get("pin", ""))
+    if secrets.compare_digest(given, DASHBOARD_PIN):
+        session["pin_ok"] = True
+        session["pin_attempts"] = 0
+        return jsonify({"ok": True})
+
+    session["pin_attempts"] = attempts + 1
+    time.sleep(1)  # bremst Rateversuche aus
+    return jsonify({"ok": False, "error": "Falsche PIN."}), 401
+
+
+@app.get("/manifest.webmanifest")
+def manifest():
+    """Macht die Seite auf dem Handy zur App (Homebildschirm)."""
+    return jsonify(
+        {
+            "name": "Schul-Cloud Aufgaben",
+            "short_name": "Aufgaben",
+            "description": "Aufgaben und Termine der Schul-Cloud Brandenburg",
+            "start_url": "/",
+            "scope": "/",
+            "display": "standalone",
+            "orientation": "portrait",
+            "background_color": "#f8fafc",
+            "theme_color": "#0f172a",
+            "lang": "de",
+            "icons": [
+                {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png",
+                 "purpose": "any maskable"},
+                {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png",
+                 "purpose": "any maskable"},
+            ],
+        }
+    )
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Der Service Worker muss von der Wurzel kommen, um alles abzudecken."""
+    response = send_from_directory(app.static_folder, "sw.js")
+    response.headers["Content-Type"] = "application/javascript"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+def _local_css_path() -> Path:
+    return Path(app.static_folder) / "css" / "tailwind.css"
+
+
+def warn_if_css_outdated() -> Optional[str]:
+    """Meldet einen Tailwind-Build, der aelter als Template oder Skript ist.
+
+    Der lokale Build enthaelt nur die Klassen, die beim Bauen im Quelltext
+    standen - ist er veraltet, bricht das Layout ohne sichtbare Fehlermeldung.
+    """
+    css = _local_css_path()
+    if not css.is_file():
+        return None
+    sources = [Path(app.template_folder) / "index.html", Path(app.static_folder) / "js" / "app.js"]
+    newest = max((p.stat().st_mtime for p in sources if p.is_file()), default=0)
+    if newest <= css.stat().st_mtime:
+        return None
+    return (
+        "Der lokale Tailwind-Build ist aelter als die Oberflaeche. Neu bauen mit:\n"
+        "  npx tailwindcss -i static/css/input.css -o static/css/tailwind.css --minify\n"
+        "  (oder static/css/tailwind.css loeschen, dann wird das CDN benutzt)"
+    )
+
+
 @app.get("/")
 def index():
     # Liegt ein lokaler Tailwind-Build vor, wird dieser statt des CDN benutzt
     # (funktioniert dann auch ohne Internetverbindung).
-    local_css = (Path(app.static_folder) / "css" / "tailwind.css").is_file()
+    local_css = _local_css_path().is_file()
     return render_template(
         "index.html",
         base_url=BASE_URL,
@@ -182,6 +277,9 @@ def index():
 
 @app.get("/api/status")
 def api_status():
+    if DASHBOARD_PIN and not session.get("pin_ok"):
+        return jsonify({"logged_in": False, "pin_required": True})
+
     entry = current_session(required=False)
     if entry is None:
         return jsonify({"logged_in": False, "demo_available": True, "base_url": BASE_URL})
@@ -390,5 +488,17 @@ if os.getenv("WERKZEUG_RUN_MAIN") != "true":
 
 
 if __name__ == "__main__":
+    from schulcloud.netinfo import report
+
     port = int(os.getenv("PORT", "5000"))
-    app.run(host=os.getenv("HOST", "127.0.0.1"), port=port, debug=os.getenv("FLASK_DEBUG") == "1")
+    host = os.getenv("HOST", "127.0.0.1")
+    print(report(port, host))
+    stale = warn_if_css_outdated()
+    if stale:
+        print("\n! " + stale)
+    if host == "0.0.0.0" and not DASHBOARD_PIN:
+        print(
+            "\n! Der Server ist im ganzen Netzwerk erreichbar, aber ohne PIN.\n"
+            "  Empfehlung: SC_DASHBOARD_PIN in der .env setzen und neu starten."
+        )
+    app.run(host=host, port=port, debug=os.getenv("FLASK_DEBUG") == "1")

@@ -22,10 +22,8 @@ fi
 [ -f .env ] || { cp .env.example .env; echo "→ .env aus .env.example erstellt."; }
 
 PORT="${PORT:-5000}"
-echo "→ Dashboard läuft auf http://127.0.0.1:${PORT}"
-if [ "${HOST:-127.0.0.1}" = "0.0.0.0" ]; then
-  IP=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
-  [ -n "${IP:-}" ] && echo "→ Im gleichen WLAN erreichbar unter http://${IP}:${PORT}"
-fi
+HOST="${HOST:-127.0.0.1}"
+.venv/bin/python -m schulcloud.netinfo --port "$PORT" --host "$HOST"
+echo
 
 exec .venv/bin/python app.py
