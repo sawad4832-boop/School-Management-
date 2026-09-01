@@ -1,20 +1,35 @@
 """Login-Wrapper und Datenabruf fuer die Schul-Cloud Brandenburg.
 
-Es gibt keine oeffentlich dokumentierte API. Die Schul-Cloud Brandenburg basiert
-auf der (quelloffenen) HPI-/dBildungscloud-Plattform, deren Backend ein
-Feathers-Service ist. Dieser Client geht deshalb gestaffelt vor:
+Eine oeffentlich dokumentierte API gibt es nicht. Die tatsaechlich vorhandenen
+Endpunkte wurden gegen ``https://brandenburg.cloud`` geprueft:
 
-1. ``strategy=api``    - JWT ueber ``POST /authentication`` holen und alle
-                         weiteren Aufrufe mit ``Authorization: Bearer <jwt>``
-                         durchfuehren.
-2. ``strategy=form``   - klassischer Formular-Login (``POST /login/``); die
-                         Plattform setzt ein ``jwt``-Cookie, das die Session
-                         traegt.
-3. ``strategy=cookie`` - ein bereits vorhandenes JWT/Cookie (z.B. aus der
-                         mitgelieferten Browser-Erweiterung) wird uebernommen.
+===================================  =========================================
+Endpunkt                             Zweck
+===================================  =========================================
+``POST /api/v3/authentication/local``  Login mit Nutzername/Passwort -> JWT
+``GET  /api/v3/me``                    angemeldeter Nutzer
+``GET  /api/v3/tasks``                 offene Aufgaben ("Aufgaben")
+``GET  /api/v3/tasks/finished``        erledigte/bewertete Aufgaben
+``GET  /api/v3/courses``               Kursuebersicht
+``GET  /api/v3/news``                  Ankuendigungen (Quelle fuer Testtermine)
+``POST /login``                        Formular-Login, benoetigt ``_csrf``
+===================================  =========================================
 
-Fuer jede Ressource wird zuerst die JSON-API versucht; scheitert sie, faellt der
-Client auf das Parsen der ausgelieferten HTML-Seiten zurueck (Scraper-Logik).
+Die alten Feathers-Services (``/api/v1/homework``, ``/submissions``, ``/lessons``)
+sind auf dieser Instanz **nicht** erreichbar; sie werden nur noch als Fallback
+fuer abweichende Instanzen versucht.
+
+Login-Strategien in dieser Reihenfolge:
+
+1. ``api``    - JWT ueber ``/api/v3/authentication/local`` (bzw. ``/authentication``
+                bei aelteren Instanzen), danach ``Authorization: Bearer <jwt>``.
+2. ``form``   - Formular-Login: ``GET /login`` fuer das CSRF-Token, dann
+                ``POST /login``; die Plattform setzt das ``jwt``-Cookie.
+3. ``cookie`` - ein vorhandenes JWT wird uebernommen (Browser-Erweiterung,
+                Zwei-Faktor-Anmeldung, Single-Sign-on).
+
+Fuer jede Ressource wird zuerst JSON versucht; scheitert das, greift die
+HTML-Scraper-Logik auf den ausgelieferten Seiten.
 """
 
 from __future__ import annotations
@@ -36,8 +51,8 @@ USER_AGENT = (
     "Chrome/124.0 Safari/537.36 SchulCloudDashboard/1.0"
 )
 
-# Reihenfolge, in der API-Praefixe ausprobiert werden.
-API_PREFIXES = ("/api/v1", "/api/v3", "/api", "")
+# Praefixe der aelteren Feathers-API (Fallback fuer abweichende Instanzen).
+LEGACY_PREFIXES = ("/api/v1", "/api", "")
 
 
 class SchulCloudError(RuntimeError):
@@ -53,10 +68,12 @@ class FetchResult:
     """Rohdaten eines Abrufs inklusive Diagnose-Informationen."""
 
     courses: list[dict] = field(default_factory=list)
-    homework: list[dict] = field(default_factory=list)
-    submissions: list[dict] = field(default_factory=list)
-    events: list[dict] = field(default_factory=list)
-    lessons: list[dict] = field(default_factory=list)
+    tasks: list[dict] = field(default_factory=list)        # /api/v3/tasks
+    homework: list[dict] = field(default_factory=list)     # Legacy/HTML
+    submissions: list[dict] = field(default_factory=list)  # Legacy
+    events: list[dict] = field(default_factory=list)       # Kalender
+    lessons: list[dict] = field(default_factory=list)      # Kursthemen
+    news: list[dict] = field(default_factory=list)         # Ankuendigungen
     sources: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
@@ -75,26 +92,31 @@ class SchulCloudClient:
         self.api_url = (api_url or "").rstrip("/") or None
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/json, text/html"})
+        self.session.headers.update(
+            {"User-Agent": USER_AGENT, "Accept": "application/json, text/html;q=0.8"}
+        )
         self.session.verify = verify_tls
         self.jwt: Optional[str] = None
         self.user: dict[str, Any] = {}
         self.strategy: str = "none"
-        self._api_root: Optional[str] = None  # gemerkter, funktionierender API-Praefix
+        self._legacy_root: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Login
     # ------------------------------------------------------------------
     def login(self, username: str, password: str) -> dict[str, Any]:
-        """Meldet sich an. Versucht API-Login, danach Formular-Login."""
+        """Meldet sich an: erst ueber die JSON-API, dann ueber das Formular."""
         errors: list[str] = []
         for strategy in (self._login_api, self._login_form):
             try:
                 strategy(username, password)
             except AuthError as exc:
+                # Falsche Zugangsdaten sind endgueltig - nicht weiter probieren.
+                if getattr(exc, "final", False):
+                    raise
                 errors.append(str(exc))
                 continue
-            except requests.RequestException as exc:  # Netzwerkprobleme
+            except requests.RequestException as exc:
                 errors.append(f"Netzwerkfehler: {exc}")
                 continue
             self.user = self._load_me()
@@ -109,40 +131,63 @@ class SchulCloudClient:
         return self.user
 
     def _login_api(self, username: str, password: str) -> None:
-        payload = {"strategy": "local", "username": username, "password": password}
+        """POST /api/v3/authentication/local (neu) bzw. /authentication (alt)."""
+        candidates: list[tuple[str, dict]] = [
+            (f"{self.base_url}/api/v3/authentication/local",
+             {"username": username, "password": password}),
+        ]
+        for root in self._legacy_roots():
+            candidates.append(
+                (f"{root}/authentication",
+                 {"strategy": "local", "username": username, "password": password})
+            )
+
         last: Optional[str] = None
-        for root in self._api_roots():
-            url = f"{root}/authentication"
+        for url, payload in candidates:
             try:
                 resp = self.session.post(url, json=payload, timeout=self.timeout)
             except requests.RequestException as exc:
                 last = str(exc)
                 continue
+
             if resp.status_code in (200, 201):
                 data = _json_or_none(resp) or {}
                 token = data.get("accessToken") or data.get("access_token")
                 if token:
                     self._set_jwt(token)
-                    self._api_root = root
                     self.strategy = "api"
                     return
-                last = "Antwort enthielt kein accessToken"
+                last = f"Antwort ohne accessToken von {url}"
             elif resp.status_code in (400, 401, 403):
-                raise AuthError("Benutzername oder Passwort wurde nicht akzeptiert.")
+                # Der Endpunkt existiert und lehnt die Daten ab.
+                raise _final_auth_error(
+                    "Benutzername oder Passwort wurde nicht akzeptiert. "
+                    "Bei Anmeldung über die Schul-Cloud-App/SSO bitte den Weg "
+                    "über das Session-Token nutzen."
+                )
             else:
                 last = f"HTTP {resp.status_code} bei {url}"
         raise AuthError(f"API-Login nicht verfügbar ({last or 'kein Endpunkt gefunden'})")
 
     def _login_form(self, username: str, password: str) -> None:
-        login_url = urljoin(self.base_url + "/", "login/")
-        data = {"username": username, "password": password, "challenge": ""}
+        """Formular-Login inklusive CSRF-Token (``POST /login``)."""
+        login_url = f"{self.base_url}/login"
+        page = self.session.get(login_url, timeout=self.timeout)
+        csrf = _extract_csrf(page.text)
+
+        data = {"username": username, "password": password, "redirect": ""}
+        if csrf:
+            data["_csrf"] = csrf
+
         resp = self.session.post(
             login_url,
             data=data,
             timeout=self.timeout,
             allow_redirects=True,
-            headers={"Referer": login_url},
+            headers={"Referer": login_url, "Origin": self.base_url},
         )
+        if resp.status_code == 403 and not csrf:
+            raise AuthError("Formular-Login abgelehnt (CSRF-Token nicht gefunden).")
         if resp.status_code >= 500:
             raise AuthError(f"Server antwortete mit HTTP {resp.status_code}")
 
@@ -153,9 +198,13 @@ class SchulCloudClient:
             return
 
         body = resp.text or ""
-        if "login" in resp.url and _looks_like_login_error(body):
-            raise AuthError("Benutzername oder Passwort wurde nicht akzeptiert.")
-        # Manche Instanzen legen das JWT in ein Inline-Skript.
+        if "/login" in resp.url:
+            raise _final_auth_error(
+                "Benutzername oder Passwort wurde nicht akzeptiert."
+                if _looks_like_login_error(body)
+                else "Login wurde abgewiesen (evtl. Zwei-Faktor-Anmeldung). "
+                     "Bitte den Weg über das Session-Token nutzen."
+            )
         match = re.search(r'"(?:accessToken|jwt)"\s*:\s*"([A-Za-z0-9._-]{20,})"', body)
         if match:
             self._set_jwt(match.group(1))
@@ -169,17 +218,28 @@ class SchulCloudClient:
         if not keep_cookie:
             try:
                 self.session.cookies.set("jwt", token, domain=_cookie_domain(self.base_url))
-            except Exception:  # pragma: no cover - Cookie-Domain exotisch
+            except Exception:  # pragma: no cover
                 log.debug("Konnte jwt-Cookie nicht setzen", exc_info=True)
 
     def _load_me(self) -> dict[str, Any]:
-        data = self._get_json("me")
-        if isinstance(data, dict) and (data.get("_id") or data.get("id")):
-            return data
-        users = self._get_json("users", params={"$limit": 1})
-        if isinstance(users, dict) and users.get("data"):
-            return users["data"][0]
-        # Fallback: Name aus dem Dashboard-HTML ziehen.
+        """Liest das eigene Profil (``/api/v3/me``) und verifiziert die Session."""
+        data = self._v3("me")
+        if isinstance(data, dict) and data:
+            user = data.get("user") if isinstance(data.get("user"), dict) else data
+            school = data.get("school") if isinstance(data.get("school"), dict) else {}
+            roles = data.get("roles") or []
+            return {
+                "_id": user.get("id") or user.get("_id"),
+                "firstName": user.get("firstName", ""),
+                "lastName": user.get("lastName", ""),
+                "school": school.get("name", ""),
+                "roles": [r.get("name") for r in roles if isinstance(r, dict)],
+            }
+
+        legacy = self._legacy("me")
+        if isinstance(legacy, dict) and (legacy.get("_id") or legacy.get("id")):
+            return legacy
+
         soup = self._get_soup("/dashboard")
         if soup is not None:
             name = soup.select_one(".username, .user-name, [data-testid='username']")
@@ -195,7 +255,7 @@ class SchulCloudClient:
 
     def logout(self) -> None:
         try:
-            self.session.post(urljoin(self.base_url + "/", "logout/"), timeout=5)
+            self.session.post(f"{self.base_url}/logout", timeout=5)
         except requests.RequestException:
             pass
         self.session.cookies.clear()
@@ -207,40 +267,39 @@ class SchulCloudClient:
     # ------------------------------------------------------------------
     # HTTP-Helfer
     # ------------------------------------------------------------------
-    def _api_roots(self) -> Iterable[str]:
-        if self._api_root:
-            yield self._api_root
+    def _request_json(self, url: str, params: Optional[dict] = None) -> Any:
+        try:
+            resp = self.session.get(url, params=params, timeout=self.timeout)
+        except requests.RequestException as exc:
+            log.debug("GET %s fehlgeschlagen: %s", url, exc)
+            return None
+        if resp.status_code == 401:
+            raise AuthError("Session abgelaufen – bitte neu anmelden.")
+        if resp.status_code >= 400:
+            log.debug("GET %s -> HTTP %s", url, resp.status_code)
+            return None
+        return _json_or_none(resp)
+
+    def _v3(self, resource: str, params: Optional[dict] = None) -> Any:
+        """Ruft einen Endpunkt der aktuellen API (``/api/v3``) ab."""
+        base = self.api_url or self.base_url
+        return self._request_json(f"{base}/api/v3/{resource.lstrip('/')}", params)
+
+    def _legacy_roots(self) -> Iterable[str]:
+        if self._legacy_root:
+            yield self._legacy_root
             return
-        bases = [self.api_url] if self.api_url else []
-        bases.append(self.base_url)
-        for base in bases:
-            if not base:
-                continue
-            for prefix in API_PREFIXES:
+        for base in filter(None, (self.api_url, self.base_url)):
+            for prefix in LEGACY_PREFIXES:
                 yield f"{base}{prefix}"
 
-    def _get_json(self, resource: str, params: Optional[dict] = None) -> Any:
-        """Holt eine Feathers-Ressource; probiert bekannte API-Praefixe durch."""
-        last_error: Optional[str] = None
-        for root in list(self._api_roots()):
-            url = f"{root}/{resource.lstrip('/')}"
-            try:
-                resp = self.session.get(url, params=params, timeout=self.timeout)
-            except requests.RequestException as exc:
-                last_error = str(exc)
-                continue
-            if resp.status_code == 401:
-                raise AuthError("Session abgelaufen – bitte neu anmelden.")
-            if resp.status_code >= 400:
-                last_error = f"HTTP {resp.status_code} bei {url}"
-                continue
-            data = _json_or_none(resp)
-            if data is None:
-                last_error = f"Keine JSON-Antwort von {url}"
-                continue
-            self._api_root = root
-            return data
-        log.debug("API-Abruf %s fehlgeschlagen: %s", resource, last_error)
+    def _legacy(self, resource: str, params: Optional[dict] = None) -> Any:
+        """Fallback auf die aeltere Feathers-API abweichender Instanzen."""
+        for root in list(self._legacy_roots()):
+            data = self._request_json(f"{root}/{resource.lstrip('/')}", params)
+            if data is not None:
+                self._legacy_root = root
+                return data
         return None
 
     def _get_soup(self, path: str) -> Optional[BeautifulSoup]:
@@ -260,64 +319,83 @@ class SchulCloudClient:
     # Datenabruf
     # ------------------------------------------------------------------
     def fetch_all(self, days_ahead: int = 120) -> FetchResult:
-        """Laedt Kurse, Aufgaben, Abgaben, Termine und Themen."""
+        """Laedt Kurse, Aufgaben, Ankuendigungen und Termine."""
         result = FetchResult()
 
-        courses = self._get_json("courses", params={"$limit": 100})
+        # --- Kursuebersicht --------------------------------------------
+        courses = _v3_list(self._v3("courses", {"skip": 0, "limit": 100}))
         if courses:
-            result.courses = _feathers_list(courses)
-            result.sources["courses"] = "api"
+            result.courses = [_normalize_course(c) for c in courses]
+            result.sources["courses"] = "api/v3"
         else:
-            result.courses = self._scrape_courses()
-            result.sources["courses"] = "html" if result.courses else "none"
-            if not result.courses:
-                result.warnings.append("Kursübersicht konnte nicht gelesen werden. Melde dich ggf. neu an.")
+            legacy = _feathers_list(self._legacy("courses", {"$limit": 100}))
+            if legacy:
+                result.courses = [_normalize_course(c) for c in legacy]
+                result.sources["courses"] = "api/v1"
+            else:
+                result.courses = self._scrape_courses()
+                result.sources["courses"] = "html" if result.courses else "none"
+                if not result.courses:
+                    result.warnings.append("Kursübersicht konnte nicht gelesen werden.")
 
-        homework = self._get_json(
-            "homework",
-            params={"$limit": 200, "$populate[]": "courseId", "$sort": "dueDate"},
-        )
-        if homework:
-            result.homework = _feathers_list(homework)
-            result.sources["homework"] = "api"
+        # --- Aufgaben ("Aufgaben" / "Abgaben") -------------------------
+        open_tasks = _v3_list(self._v3("tasks", {"skip": 0, "limit": 100}))
+        done_tasks = _v3_list(self._v3("tasks/finished", {"skip": 0, "limit": 100}))
+        if open_tasks or done_tasks:
+            for task in open_tasks:
+                task["_finished"] = False
+            for task in done_tasks:
+                task["_finished"] = True
+            result.tasks = open_tasks + done_tasks
+            result.sources["tasks"] = "api/v3"
         else:
-            result.homework = self._scrape_homework()
-            result.sources["homework"] = "html" if result.homework else "none"
-            if not result.homework:
-                result.warnings.append("Aufgabenmodul konnte nicht gelesen werden. Melde dich ggf. neu an.")
+            legacy = _feathers_list(
+                self._legacy("homework", {"$limit": 200, "$populate[]": "courseId"})
+            )
+            if legacy:
+                result.homework = legacy
+                result.sources["tasks"] = "api/v1"
+                result.submissions = _feathers_list(
+                    self._legacy("submissions", {"$limit": 200})
+                )
+            else:
+                result.homework = self._scrape_homework()
+                result.sources["tasks"] = "html" if result.homework else "none"
+                if not result.homework:
+                    result.warnings.append(
+                        "Aufgabenmodul konnte nicht gelesen werden – bitte neu anmelden."
+                    )
 
-        user_id = self.user.get("_id") or self.user.get("id")
-        params = {"$limit": 200}
-        if user_id:
-            params["studentId"] = user_id
-        submissions = self._get_json("submissions", params=params)
-        if submissions:
-            result.submissions = _feathers_list(submissions)
-            result.sources["submissions"] = "api"
+        # --- Ankuendigungen und Kalender -------------------------------
+        result.news = _v3_list(self._v3("news", {"skip": 0, "limit": 50}))
+        if result.news:
+            result.sources["news"] = "api/v3"
 
         result.events = self._fetch_calendar(days_ahead)
-        result.sources["calendar"] = "api" if result.events else "none"
+        if result.events:
+            result.sources["calendar"] = "api"
 
-        lessons = self._get_json("lessons", params={"$limit": 200})
-        if lessons:
-            result.lessons = _feathers_list(lessons)
-            result.sources["lessons"] = "api"
+        result.lessons = _feathers_list(self._legacy("lessons", {"$limit": 200}))
+        if result.lessons:
+            result.sources["lessons"] = "api/v1"
 
         return result
 
     def _fetch_calendar(self, days_ahead: int) -> list[dict]:
+        """Kalendertermine; der Kalenderdienst haengt an mehreren Routen."""
         now = datetime.now(timezone.utc)
         window = {
             "from": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "until": (now + timedelta(days=days_ahead)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        for resource, params in (
-            ("calendar", {"all": "true", **window}),
-            ("calendar/events", window),
-            ("events", {"$limit": 200}),
-        ):
-            data = self._get_json(resource, params=params)
-            items = _feathers_list(data) if data else []
+        candidates = (
+            (f"{self.base_url}/calendar/events", window),
+            (f"{self.base_url}/api/v3/calendar/events", window),
+            (f"{self.base_url}/calendar", {"all": "true", **window}),
+        )
+        for url, params in candidates:
+            data = self._request_json(url, params)
+            items = _v3_list(data) or _feathers_list(data)
             if items:
                 return items
         return []
@@ -343,9 +421,9 @@ class SchulCloudClient:
         return courses
 
     def _scrape_homework(self) -> list[dict]:
-        """Liest /homework/ (Aufgaben & Abgaben) aus dem HTML."""
+        """Liest /homework (Aufgaben & Abgaben) aus dem HTML."""
         items: list[dict] = []
-        for path in ("/homework/", "/homework/asked", "/dashboard"):
+        for path in ("/homework", "/homework/asked", "/dashboard"):
             soup = self._get_soup(path)
             if soup is None:
                 continue
@@ -379,9 +457,29 @@ class SchulCloudClient:
 # ----------------------------------------------------------------------
 # Hilfsfunktionen
 # ----------------------------------------------------------------------
+def _final_auth_error(message: str) -> AuthError:
+    """Fehler, nach dem keine weitere Strategie mehr probiert wird."""
+    error = AuthError(message)
+    error.final = True  # type: ignore[attr-defined]
+    return error
+
+
+def _extract_csrf(html: str) -> Optional[str]:
+    """Liest das ``_csrf``-Feld aus dem Login-Formular.
+
+    Bewusst ueber den HTML-Parser statt per Regex: im Formular steht vor dem
+    ``name``-Attribut noch ein ``data-force-value="true"``, an dem sich ein
+    Regex-Ansatz verschluckt.
+    """
+    field = BeautifulSoup(html or "", "html.parser").find("input", attrs={"name": "_csrf"})
+    if field is None:
+        return None
+    value = field.get("value")
+    return value or None
+
+
 def _json_or_none(resp: requests.Response) -> Any:
-    ctype = resp.headers.get("Content-Type", "")
-    if "json" not in ctype:
+    if "json" not in resp.headers.get("Content-Type", ""):
         return None
     try:
         return resp.json()
@@ -389,8 +487,16 @@ def _json_or_none(resp: requests.Response) -> Any:
         return None
 
 
+def _v3_list(data: Any) -> list[dict]:
+    """Die v3-API antwortet mit ``{"data": [...], "total": n}``."""
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return [d for d in data["data"] if isinstance(d, dict)]
+    if isinstance(data, list):
+        return [d for d in data if isinstance(d, dict)]
+    return []
+
+
 def _feathers_list(data: Any) -> list[dict]:
-    """Feathers liefert entweder eine Liste oder ``{"data": [...]}``."""
     if isinstance(data, list):
         return [d for d in data if isinstance(d, dict)]
     if isinstance(data, dict):
@@ -401,13 +507,22 @@ def _feathers_list(data: Any) -> list[dict]:
     return []
 
 
+def _normalize_course(course: dict) -> dict:
+    """Vereinheitlicht v3- (``id``) und Feathers-Kurse (``_id``)."""
+    return {
+        "_id": course.get("id") or course.get("_id"),
+        "name": course.get("name") or course.get("title") or "",
+        "color": course.get("displayColor") or course.get("color"),
+    }
+
+
 def _cookie_domain(base_url: str) -> str:
     host = re.sub(r"^https?://", "", base_url).split("/")[0]
     return host.split(":")[0]
 
 
 def _looks_like_login_error(html: str) -> bool:
-    lowered = html.lower()
+    lowered = (html or "").lower()
     needles = ("falsche", "nicht korrekt", "invalid", "fehlgeschlagen", "not authenticated")
     return any(n in lowered for n in needles)
 

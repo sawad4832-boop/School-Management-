@@ -138,8 +138,18 @@ def build_items(fetch, base_url: str, source: str = "api") -> list[dict]:
     submissions = _index_submissions(getattr(fetch, "submissions", []) or [])
 
     items: list[dict] = []
+    for task in getattr(fetch, "tasks", []) or []:
+        item = normalize_task(task, courses, base_url, source)
+        if item:
+            items.append(item)
+
     for hw in getattr(fetch, "homework", []) or []:
         item = normalize_homework(hw, courses, submissions, base_url, source)
+        if item:
+            items.append(item)
+
+    for entry in getattr(fetch, "news", []) or []:
+        item = normalize_news(entry, courses, base_url, source)
         if item:
             items.append(item)
 
@@ -164,6 +174,84 @@ def _index_submissions(submissions: Iterable[dict]) -> dict[str, dict]:
         if hw_id:
             index[hw_id] = sub
     return index
+
+
+def normalize_task(task: dict, courses: dict[str, dict], base_url: str, source: str) -> Optional[dict]:
+    """Aufgabe aus ``/api/v3/tasks`` bzw. ``/api/v3/tasks/finished``.
+
+    Der Status steckt dort in einem Unterobjekt::
+
+        "status": {"submitted": 1, "maxSubmissions": 1, "graded": 0,
+                   "isDraft": false, "isFinished": false}
+    """
+    task_id = task.get("id") or task.get("_id")
+    title = (task.get("name") or "").strip() or "Aufgabe ohne Titel"
+    if not task_id:
+        task_id = _fallback_id(title, task.get("dueDate"))
+
+    status_info = task.get("status") if isinstance(task.get("status"), dict) else {}
+    if status_info.get("isDraft"):
+        return None  # Entwuerfe von Lehrkraeften gehoeren nicht ins To-do
+
+    if (status_info.get("graded") or 0) > 0:
+        status = "graded"
+    elif (status_info.get("submitted") or 0) > 0:
+        status = "submitted"
+    else:
+        status = "open"
+
+    description = strip_html(task.get("description"))
+    due = parse_datetime(task.get("dueDate")) or find_deadline_in_text(f"{title} {description}")
+    course = _resolve_course(task.get("courseId"), courses)
+    course_name = (course or {}).get("name") or task.get("courseName") or "Ohne Kurs"
+
+    return {
+        "id": f"hw:{task_id}",
+        "kind": "exam" if is_exam(title, description) else "homework",
+        "title": title,
+        "course": course_name,
+        "course_id": (course or {}).get("_id"),
+        "color": task.get("displayColor") or (course or {}).get("color"),
+        "due": due.isoformat() if due else None,
+        "status": status,
+        "grade": None,
+        "finished": bool(task.get("_finished") or status_info.get("isFinished")),
+        "url": urljoin(base_url + "/", f"homework/{task_id}"),
+        "teacher": task.get("createdBy") or "",
+        "description": description or (task.get("lessonName") or ""),
+        "source": source,
+    }
+
+
+def normalize_news(entry: dict, courses: dict[str, dict], base_url: str, source: str) -> Optional[dict]:
+    """Ankuendigungen (``/api/v3/news``) - nur Testtermine sind relevant."""
+    title = (entry.get("title") or "").strip()
+    content = strip_html(entry.get("content"), 1000)
+    if not title or not is_exam(title, content):
+        return None
+
+    due = find_deadline_in_text(f"{title} {content}")
+    if due is None:
+        return None  # ohne Termin waere der Eintrag im To-do wertlos
+
+    news_id = entry.get("id") or entry.get("_id") or _fallback_id(title, due.isoformat())
+    target = entry.get("target") if isinstance(entry.get("target"), dict) else {}
+    course = _resolve_course(target.get("id"), courses)
+    return {
+        "id": f"nw:{news_id}",
+        "kind": "exam",
+        "title": title,
+        "course": (course or {}).get("name") or target.get("name") or "Ankündigung",
+        "course_id": (course or {}).get("_id"),
+        "color": (course or {}).get("color"),
+        "due": due.isoformat(),
+        "status": "open",
+        "grade": None,
+        "url": urljoin(base_url + "/", f"news/{news_id}"),
+        "teacher": "",
+        "description": content,
+        "source": source,
+    }
 
 
 def normalize_homework(

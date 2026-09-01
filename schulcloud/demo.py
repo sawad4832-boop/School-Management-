@@ -1,4 +1,7 @@
-"""Demo-Datensatz - erlaubt das Ausprobieren der Oberflaeche ohne Login.
+"""Demo-Datensatz – erlaubt das Ausprobieren der Oberflaeche ohne Login.
+
+Die Struktur entspricht den echten Antworten der Schul-Cloud
+(``/api/v3/tasks``, ``/api/v3/courses``, Kalender, Kursthemen).
 
 Aktivierung: ``SC_DEMO=1`` in der ``.env`` oder Login mit Benutzer ``demo``
 und Passwort ``demo``.
@@ -17,8 +20,25 @@ def _in(hours: float) -> str:
     return (datetime.now(BERLIN) + timedelta(hours=hours)).replace(microsecond=0).isoformat()
 
 
+def _status(submitted: int = 0, graded: int = 0, finished: bool = False) -> dict:
+    return {
+        "submitted": submitted,
+        "maxSubmissions": 1,
+        "graded": graded,
+        "isDraft": False,
+        "isSubstitutionTeacher": False,
+        "isFinished": finished,
+    }
+
+
 def demo_user() -> dict:
-    return {"_id": "demo-user", "firstName": "Demo", "lastName": "Schülerin", "roles": ["student"]}
+    return {
+        "_id": "demo-user",
+        "firstName": "Demo",
+        "lastName": "Schülerin",
+        "school": "Beispielschule",
+        "roles": ["student"],
+    }
 
 
 def demo_fetch() -> FetchResult:
@@ -29,55 +49,65 @@ def demo_fetch() -> FetchResult:
         {"_id": "c4", "name": "Geschichte 10b", "color": "#F44336"},
         {"_id": "c5", "name": "Englisch 10b", "color": "#03A9F4"},
     ]
-    homework = [
+    tasks = [
         {
-            "_id": "hw1",
+            "id": "hw1",
             "name": "Arbeitsblatt 4: Quadratische Funktionen",
-            "courseId": courses[0],
+            "courseName": "Mathematik 10b",
+            "courseId": "c1",
             "dueDate": _in(-6),
             "description": "<p>Aufgaben 1–5 auf dem Arbeitsblatt lösen und hochladen.</p>",
-            "teacherId": {"firstName": "Herr", "lastName": "Neumann"},
+            "displayColor": "#1DE9B6",
+            "createdBy": "Herr Neumann",
+            "status": _status(),
         },
         {
-            "_id": "hw2",
+            "id": "hw2",
             "name": "Gedichtanalyse 'Der Panther'",
-            "courseId": courses[1],
+            "courseName": "Deutsch 10b",
+            "courseId": "c2",
             "dueDate": _in(14),
             "description": "<p>Analyse (mind. 500 Wörter) als PDF abgeben.</p>",
-            "teacherId": {"firstName": "Frau", "lastName": "Weber"},
+            "createdBy": "Frau Weber",
+            "status": _status(),
         },
         {
-            "_id": "hw3",
+            "id": "hw3",
             "name": "Protokoll Fotosynthese-Versuch",
-            "courseId": courses[2],
+            "courseName": "Biologie 10b",
+            "courseId": "c3",
             "dueDate": _in(40),
             "description": "<p>Versuchsprotokoll nach Vorlage.</p>",
+            "status": _status(submitted=1),
         },
         {
-            "_id": "hw4",
+            "id": "hw4",
             "name": "Vorbereitung Klassenarbeit Nr. 1",
-            "courseId": courses[3],
+            "courseName": "Geschichte 10b",
+            "courseId": "c4",
             "dueDate": _in(96),
             "description": "<p>Die Klassenarbeit umfasst die Themen Kaiserreich und Weimarer Republik.</p>",
+            "status": _status(),
         },
         {
-            "_id": "hw5",
-            "name": "Vocabulary Unit 3 - Wordlist",
-            "courseId": courses[4],
-            "dueDate": _in(-30),
-            "description": "<p>Vokabeln lernen, Test folgt.</p>",
-        },
-        {
-            "_id": "hw6",
+            "id": "hw6",
             "name": "Lesetagebuch Kapitel 1-4",
-            "courseId": courses[1],
+            "courseName": "Deutsch 10b",
+            "courseId": "c2",
             "dueDate": _in(240),
             "description": "<p>Einträge zu den ersten vier Kapiteln.</p>",
+            "status": _status(),
         },
-    ]
-    submissions = [
-        {"_id": "s1", "homeworkId": "hw5", "grade": 14, "gradeComment": "<p>Sehr gut!</p>"},
-        {"_id": "s2", "homeworkId": "hw3"},
+        {
+            "id": "hw5",
+            "name": "Vocabulary Unit 3 – Wordlist",
+            "courseName": "Englisch 10b",
+            "courseId": "c5",
+            "dueDate": _in(-30),
+            "description": "<p>Vokabeln lernen, Test folgt.</p>",
+            "status": _status(submitted=1, graded=1),
+            "_finished": True,
+        },
     ]
     events = [
         {
@@ -118,11 +148,26 @@ def demo_fetch() -> FetchResult:
             ],
         }
     ]
+    news = [
+        {
+            "id": "nw1",
+            "title": "Praktikumsmappe abgeben",
+            "content": "<p>Die Facharbeit ist spätestens bis "
+            + (datetime.now(BERLIN) + timedelta(days=12)).strftime("%d.%m.%Y")
+            + " im Sekretariat abzugeben.</p>",
+            "target": {"id": "c4", "name": "Geschichte 10b"},
+        },
+        {
+            "id": "nw2",
+            "title": "Mensa bleibt Freitag geschlossen",
+            "content": "<p>Bitte Verpflegung mitbringen.</p>",
+        },
+    ]
     return FetchResult(
         courses=courses,
-        homework=homework,
-        submissions=submissions,
+        tasks=tasks,
         events=events,
         lessons=lessons,
-        sources={"courses": "demo", "homework": "demo", "calendar": "demo"},
+        news=news,
+        sources={"courses": "demo", "tasks": "demo", "calendar": "demo", "news": "demo"},
     )

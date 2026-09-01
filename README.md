@@ -1,39 +1,90 @@
 # Schul-Cloud Brandenburg – persönliches Dashboard
 
-Ein lokal laufendes Dashboard, das Aufgaben, Abgabetermine und Testankündigungen
-aus der Schul-Cloud Brandenburg einsammelt, nach Dringlichkeit sortiert und eine
-eigene Abhak-Funktion mit Archiv bereitstellt.
+Ein Dashboard, das **auf deinem eigenen Rechner läuft** und Aufgaben, Abgabetermine
+und Testankündigungen aus der Schul-Cloud Brandenburg einsammelt, nach Dringlichkeit
+sortiert und eine eigene Abhak-Funktion mit Archiv bereitstellt.
 
-**Backend:** Python 3.11 + Flask · **Frontend:** HTML + Tailwind CSS + Vanilla JS ·
+**Backend:** Python 3.9+ / Flask · **Frontend:** HTML + Tailwind CSS + Vanilla JS ·
 **Speicher:** SQLite (nur lokal)
 
 ![Dashboard](docs/screenshot.png)
 
 ---
 
-## 1. Schnellstart
+## 1. Wichtig vorab: `http://127.0.0.1:5000` ist *dein* Rechner
+
+`127.0.0.1` (= `localhost`) bedeutet immer „das Gerät, auf dem der Browser läuft".
+Der Link funktioniert also **nur, während das Programm auf genau diesem Gerät läuft**.
+Wenn Safari „Server nicht gefunden" oder „Verbindung fehlgeschlagen" meldet, ist der
+Server bei dir schlicht nicht gestartet. Es gibt keine Internetadresse, unter der das
+Dashboard ohne eigene Installation erreichbar wäre – und das ist Absicht: So bleiben
+Zugangsdaten und Aufgaben auf deinem Gerät.
+
+## 2. Installation auf dem Mac (Schritt für Schritt)
+
+1. **Terminal öffnen** – ⌘ + Leertaste, „Terminal" eingeben, Enter.
+2. **Python prüfen:**
+   ```bash
+   python3 --version
+   ```
+   Kommt eine Versionsnummer (3.9 oder höher), ist alles gut. Kommt ein Fehler oder
+   öffnet sich die Entwickler-Installation, Python von [python.org/downloads](https://www.python.org/downloads/)
+   installieren und das Terminal danach neu öffnen.
+3. **Projekt laden und starten:**
+   ```bash
+   git clone https://github.com/sawad4832-boop/School-Management-.git
+   cd School-Management-
+   ./run.sh
+   ```
+   `run.sh` legt beim ersten Mal eine virtuelle Umgebung an, installiert die
+   Abhängigkeiten und startet den Server. Das dauert einmalig ein bis zwei Minuten.
+4. Im Terminal erscheint:
+   ```
+   → Dashboard läuft auf http://127.0.0.1:5000
+   ```
+   **Jetzt** diesen Link in Safari öffnen. Das Terminal muss dabei offen bleiben –
+   es *ist* der Server. Beenden mit `Ctrl + C`.
+5. Auf der Login-Seite die Zugangsdaten der Schul-Cloud eingeben. Sie gehen direkt
+   an `brandenburg.cloud` und werden nirgends gespeichert.
+
+> **Erstmal ohne Zugangsdaten ausprobieren:** auf **„Demo-Daten ansehen"** klicken.
+> Wenn das läuft, funktioniert die Installation – dann fehlt nur noch der Login.
+
+Ohne `git` geht es auch: auf GitHub **Code → Download ZIP**, entpacken, im Terminal
+in den Ordner wechseln (`cd ~/Downloads/School-Management--main`) und `./run.sh` starten.
+
+### Wenn der Login nicht klappt: Verbindungstest
 
 ```bash
-git clone https://github.com/sawad4832-boop/School-Management-.git
-cd School-Management-
-
-./run.sh              # legt venv an, installiert Abhängigkeiten, startet den Server
+.venv/bin/python -m schulcloud.check
 ```
 
-Alternativ manuell:
+Der Test prüft die Erreichbarkeit, meldet sich an und zeigt die nächsten Termine.
+Das Passwort wird verdeckt eingegeben und nicht gespeichert. Nur die Erreichbarkeit
+prüfen: `.venv/bin/python -m schulcloud.check --no-login`.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env               # Werte anpassen (mindestens SECRET_KEY)
-python app.py
+Ausgabe im Erfolgsfall:
+
+```
+1) Erreichbarkeit von https://brandenburg.cloud
+  ✅ Login-Seite erreichbar (HTTP 200)
+2) Erwartete Endpunkte (401 = vorhanden, aber Login nötig)
+  ✅ /api/v3/tasks: HTTP 401
+3) Anmeldung
+  ✅ Angemeldet als Mia Muster (Beispielschule)
+  • verwendete Strategie: api
 ```
 
-Danach im Browser **http://127.0.0.1:5000** öffnen.
+### Auf dem iPhone/iPad benutzen
 
-> Zum Ausprobieren ohne Zugangsdaten: auf der Login-Seite **„Demo-Daten ansehen“**
-> klicken (oder `SC_DEMO=1` in der `.env` setzen).
+Auf iOS lässt sich der Server nicht installieren. Zwei Wege:
+
+* **Im gleichen WLAN:** auf dem Mac `HOST=0.0.0.0 ./run.sh` starten. Das Skript zeigt
+  dann zusätzlich eine Adresse wie `http://192.168.2.31:5000`, die du am iPhone im
+  Safari öffnen kannst – solange der Mac läuft und beide im selben WLAN sind.
+  (Damit ist das Dashboard für alle Geräte im Netz erreichbar; nur im Heimnetz nutzen.)
+* **Dauerhaft:** auf einem kleinen Server/Raspberry Pi betreiben – dann aber unbedingt
+  HTTPS und ein zusätzliches Passwort davorschalten.
 
 ### Konfiguration (`.env`)
 
@@ -51,69 +102,85 @@ Danach im Browser **http://127.0.0.1:5000** öffnen.
 ### Tests
 
 ```bash
-pip install pytest
-python -m pytest -q          # 19 Tests: Parsing, Dringlichkeit, Store, HTTP-API
+.venv/bin/pip install pytest
+.venv/bin/python -m pytest -q     # 28 Tests: Client, Parsing, Store, HTTP-API
 ```
 
 ---
 
-## 2. Anmeldung an der Schul-Cloud
+## 3. Anmeldung an der Schul-Cloud
 
-Es gibt **keine offizielle öffentliche API**. Die Schul-Cloud Brandenburg basiert auf
-der quelloffenen HPI-/dBildungscloud-Plattform mit einem Feathers-Backend. Der
-Client in `schulcloud/client.py` geht deshalb gestaffelt vor und nimmt den ersten
-Weg, der funktioniert:
+Es gibt **keine offizielle öffentliche API**. Die folgenden Endpunkte wurden gegen
+`https://brandenburg.cloud` geprüft und werden vom Client verwendet:
+
+| Endpunkt | Zweck |
+|---|---|
+| `POST /api/v3/authentication/local` | Login mit Nutzername/Passwort → JWT |
+| `GET /api/v3/me` | angemeldeter Nutzer, Schule, Rollen |
+| `GET /api/v3/tasks` | offene Aufgaben (Modul „Aufgaben") |
+| `GET /api/v3/tasks/finished` | abgeschlossene und bewertete Aufgaben |
+| `GET /api/v3/courses` | Kursübersicht inkl. Farbe |
+| `GET /api/v3/news` | Ankündigungen (Quelle für Testtermine) |
+| `POST /login` | Formular-Login – benötigt das `_csrf`-Feld der Login-Seite |
+
+Die älteren Feathers-Services (`/api/v1/homework`, `/submissions`, `/lessons`) sind auf
+dieser Instanz **nicht** erreichbar und werden nur noch als Fallback für abweichende
+Instanzen versucht; danach greift die HTML-Scraper-Logik.
+
+**Login-Strategien** (in dieser Reihenfolge, die erste funktionierende gewinnt):
 
 | Strategie | Ablauf |
 |---|---|
-| `api` | `POST /authentication` mit `{strategy:"local", username, password}` → JWT → `Authorization: Bearer …` |
-| `form` | klassischer Formular-Login `POST /login/` → Plattform setzt das `jwt`-Cookie, die Session wird weitergeführt |
-| `cookie` | ein vorhandenes JWT (Login-Feld „Session-Token“ oder Browser-Erweiterung) wird übernommen |
+| `api` | `POST /api/v3/authentication/local` → JWT → `Authorization: Bearer …` |
+| `form` | `GET /login` (CSRF-Token lesen) → `POST /login` → `jwt`-Cookie |
+| `cookie` | vorhandenes JWT übernehmen (Login-Feld „Session-Token" oder Erweiterung) |
 
-Für jede Ressource wird zuerst die JSON-API (`/api/v1`, `/api/v3`, `/api`, `/`) probiert;
-schlägt das fehl, greift die HTML-Scraper-Logik (`_scrape_courses`, `_scrape_homework`).
+Wird das Passwort abgelehnt (HTTP 401), bricht der Client sofort ab, statt es beim
+Formular-Login ein zweites Mal zu versuchen – so laufen keine Fehlversuche auf.
+
+**Bei Zwei-Faktor-Anmeldung oder Single-Sign-on** funktioniert der direkte Login nicht.
+Dann in der Schul-Cloud im Browser anmelden, das Cookie `jwt` kopieren und im Dashboard
+unter „Alternative: Session-Token" einfügen – oder die Browser-Erweiterung nutzen.
 
 **Umgang mit Zugangsdaten**
 
-* Das Passwort wird nur zum Login an die Schul-Cloud durchgereicht und **nie gespeichert**.
+* Das Passwort wird nur zum Login durchgereicht und **nie gespeichert**.
 * JWT und Session liegen ausschließlich im Arbeitsspeicher des lokalen Servers
   (`SESSIONS` in `app.py`) – nach einem Neustart ist eine neue Anmeldung nötig.
 * In SQLite landen nur Aufgaben-Metadaten und der eigene Abhak-Status.
-* Der Server bindet standardmäßig auf `127.0.0.1`, ist also nicht aus dem Netz erreichbar.
-* Bei Zwei-Faktor-Anmeldung oder Single-Sign-on den Weg über Session-Token /
-  Browser-Erweiterung nutzen.
+* Der Server bindet standardmäßig auf `127.0.0.1` und ist nicht von außen erreichbar.
 
 ### Aktualisierung
 
-* **Button „Aktualisieren“** in der Kopfzeile (`POST /api/refresh`).
-* **Automatisch** alle `SC_REFRESH_MINUTES` Minuten – serverseitig durch einen
-  Hintergrund-Thread und zusätzlich im Browser-Tab.
+* **Button „Aktualisieren"** in der Kopfzeile (`POST /api/refresh`).
+* **Automatisch** alle `SC_REFRESH_MINUTES` Minuten – im Hintergrund-Thread des Servers
+  und zusätzlich im geöffneten Browser-Tab.
 * **Per Erweiterung** durch `POST /api/ingest`.
 
 ---
 
-## 3. Browser-Erweiterung (Ordner `browser-extension/`)
+## 4. Browser-Erweiterung (Ordner `browser-extension/`)
 
-Nützlich, wenn der direkte Login nicht möglich ist (2FA, SSO, Captcha): Die
-Erweiterung liest das Session-Cookie der bereits angemeldeten Schul-Cloud aus und
-schickt es an das lokale Dashboard – oder scrapt die sichtbare Aufgabenliste direkt
-im Browser.
+Für den Fall, dass der direkte Login nicht möglich ist (2FA, SSO): Die Erweiterung liest
+das Session-Cookie der bereits angemeldeten Schul-Cloud aus und schickt es an das lokale
+Dashboard – oder scrapt die sichtbare Aufgabenliste direkt im Browser.
 
 **Installation (Chrome/Edge):**
 
-1. In der `.env` ein `SC_INGEST_TOKEN=<beliebiges-geheimnis>` setzen und den Server neu starten.
-2. `chrome://extensions` öffnen → **Entwicklermodus** aktivieren → **Entpackte Erweiterung laden**
+1. In der `.env` ein `SC_INGEST_TOKEN=<beliebiges-geheimnis>` setzen, Server neu starten.
+2. `chrome://extensions` öffnen → **Entwicklermodus** → **Entpackte Erweiterung laden**
    → Ordner `browser-extension/` wählen.
-3. Im Popup der Erweiterung Dashboard-URL und Ingest-Token eintragen, **Einstellungen speichern**.
-4. In der Schul-Cloud anmelden, dann **„Session & Daten übertragen“** klicken.
-   Auf der Aufgabenseite funktioniert zusätzlich **„Sichtbare Aufgaben scrapen“**.
+3. Im Popup Dashboard-URL und Ingest-Token eintragen, **Einstellungen speichern**.
+4. In der Schul-Cloud anmelden, dann **„Session & Daten übertragen"** klicken.
+   Auf der Aufgabenseite funktioniert zusätzlich **„Sichtbare Aufgaben scrapen"**.
 
 `/api/ingest` ist ohne gesetztes `SC_INGEST_TOKEN` deaktiviert und prüft den Header
-`X-Ingest-Token` per `secrets.compare_digest`.
+`X-Ingest-Token` per `secrets.compare_digest`. (Safari verlangt für eigene Erweiterungen
+ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/Edge gebaut.)
 
 ---
 
-## 4. Datenanalyse & Parsing
+## 5. Datenanalyse & Parsing
 
 `schulcloud/parser.py` normalisiert alle Quellen auf ein einheitliches Format:
 
@@ -121,39 +188,39 @@ im Browser.
 {
   "id": "hw:5f2b…", "kind": "homework|exam", "title": "…", "course": "Mathematik 10b",
   "due": "2026-09-03T14:00:00+02:00", "status": "open|submitted|graded",
-  "grade": "13", "url": "https://…/homework/5f2b…", "teacher": "Herr Neumann"
+  "finished": false, "url": "https://…/homework/5f2b…", "teacher": "Herr Neumann"
 }
 ```
 
-* **Kursübersicht** – `/courses` (API) bzw. Kurskarten im HTML; liefert Name und Farbe.
-* **Aufgabenmodul** – `/homework` inklusive `courseId`; Titel, Fach, Beschreibung, `dueDate`.
+* **Kursübersicht** – `/api/v3/courses`; liefert Name und Anzeigefarbe.
+* **Aufgabenmodul** – `/api/v3/tasks` und `/api/v3/tasks/finished`: Titel, Fach,
+  Beschreibung, Fälligkeit. Entwürfe von Lehrkräften werden übersprungen.
 * **Abgabetermine** – `parse_datetime()` versteht ISO-8601, Millisekunden-Timestamps und
   deutsche Schreibweisen (`03.09.2026, 14:00`, `3.9.26`). Fehlt ein Termin, sucht
-  `find_deadline_in_text()` Formulierungen wie „Abgabe bis 12.09.2026 um 18:00“.
-* **Status** – aus `/submissions`: keine Abgabe → `offen`, Abgabe ohne Note →
-  `eingereicht`, mit `grade`/`gradeComment` → `bewertet` (wandert automatisch ins Archiv).
-  Im HTML-Fallback werden die Statuswörter der Karten ausgewertet.
-* **Testankündigungen** – Titel, Beschreibungen, Kalendereinträge (`/calendar`) und
-  Kursthemen (`/lessons`) werden gegen eine Stichwortliste geprüft: Klassenarbeit,
-  Klausur, Lernkontrolle, Vokabeltest, Prüfung, Diktat, Referat, Präsentation, …
-  Treffer erscheinen als eigener Typ **„Test / Arbeit“**; gewöhnliche Stundenplan-Termine
-  werden bewusst ignoriert.
+  `find_deadline_in_text()` Formulierungen wie „Abgabe bis 12.09.2026 um 18:00".
+* **Status** – aus dem `status`-Objekt der Aufgabe: `graded > 0` → **bewertet**,
+  `submitted > 0` → **eingereicht**, sonst **offen**. Bewertete und in der Schul-Cloud
+  abgeschlossene Aufgaben landen automatisch im Archiv.
+* **Testankündigungen** – Titel, Beschreibungen, Ankündigungen (`/api/v3/news`),
+  Kalendereinträge und Kursthemen werden gegen eine Stichwortliste geprüft:
+  Klassenarbeit, Klausur, Lernkontrolle, Vokabeltest, Prüfung, Diktat, Referat,
+  Präsentation … Treffer erscheinen als Typ **„Test / Arbeit"**; gewöhnliche
+  Stundenplan- und Schultermine werden bewusst ignoriert.
 
-## 5. Übersicht & Interaktivität
+## 6. Übersicht & Interaktivität
 
 * **Sortierung nach Dringlichkeit:** überfällig → < 24 h → < 48 h → diese Woche → später →
   ohne Termin, innerhalb einer Stufe nach Abgabezeitpunkt.
-* **Farbliche Warnungen:** roter Balken/Chip bei überfällig und < 24 h, orange bei < 48 h,
-  gelb innerhalb einer Woche, grau danach. Dazu ein Countdown („in 13 Std. 59 Min.“).
-* **Abhaken:** Klick auf die Checkbox → `POST /api/items/<id>/done` → Eintrag verschwindet
-  aus der To-do-Liste und landet im Archiv (dort per „Zurückholen“ reversibel).
-  Der Status wird **lokal** in SQLite geführt, weil die Schul-Cloud kein Setzen von außen
-  erlaubt – er bleibt deshalb auch nach einer Aktualisierung erhalten, selbst wenn die
-  Aufgabe dort nicht mehr auftaucht.
-* **Kennzahlen** oben: offen, überfällig, nächste 24 h / 48 h, Tests, erledigt.
+* **Farbliche Warnungen:** roter Balken bei überfällig und < 24 h, orange bei < 48 h,
+  gelb innerhalb einer Woche, grau danach. Dazu ein Countdown („in 13 Std. 59 Min.").
+* **Abhaken:** Klick auf die Checkbox → Eintrag wandert ins Archiv, dort per
+  „Zurückholen" reversibel. Der Status wird **lokal** in SQLite geführt, weil die
+  Schul-Cloud kein Setzen von außen erlaubt – er bleibt deshalb auch nach einer
+  Aktualisierung erhalten, selbst wenn die Aufgabe dort verschwindet.
+* **Kennzahlen:** offen, überfällig, nächste 24 h / 48 h, Tests, erledigt.
 * **Filter** nach Typ (Aufgaben / Tests / dringend), Kurs und Volltextsuche.
 
-### HTTP-Endpunkte
+### HTTP-Endpunkte des Dashboards
 
 | Methode & Pfad | Zweck |
 |---|---|
@@ -163,31 +230,32 @@ im Browser.
 | `POST /api/logout` | Session verwerfen |
 | `GET /api/items` | aktive Liste + Archiv + Kennzahlen |
 | `POST /api/refresh` | Daten neu von der Schul-Cloud holen |
-| `POST /api/items/<id>/done` | `{done:true|false}` – abhaken / zurückholen |
+| `POST /api/items/<id>/done` | `{done:true\|false}` – abhaken / zurückholen |
 | `POST /api/items/<id>/note` | eigene Notiz speichern |
 | `POST /api/ingest` | Endpunkt der Browser-Erweiterung (Token nötig) |
 | `GET /api/health` | Health-Check |
 
 ---
 
-## 6. Projektstruktur
+## 7. Projektstruktur
 
 ```
 app.py                    Flask-App: Routen, Sessions, Hintergrund-Aktualisierung
-schulcloud/client.py      Login-Wrapper (API / Formular / Cookie) + Scraper-Fallback
+schulcloud/client.py      Login-Wrapper (API / Formular+CSRF / Cookie) + Scraper-Fallback
 schulcloud/parser.py      Normalisierung, Terminerkennung, Testerkennung, Dringlichkeit
 schulcloud/store.py       SQLite: Abhak-Status, Notizen, Cache
+schulcloud/check.py       Verbindungstest für die Kommandozeile
 schulcloud/demo.py        Beispieldaten für den Demo-Modus
 templates/index.html      Oberfläche (Tailwind)
 static/js/app.js          Frontend-Logik (Fetch + DOM)
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite
+tests/                    pytest-Suite (28 Tests)
 ```
 
 ### Ohne CDN betreiben
 
-Standardmäßig lädt die Seite Tailwind über das CDN. Ein lokaler Build wird
-automatisch bevorzugt, sobald `static/css/tailwind.css` existiert:
+Die Seite lädt Tailwind über das CDN, ein lokaler Build wird aber automatisch bevorzugt
+(`static/css/tailwind.css` liegt bereits bei). Neu bauen:
 
 ```bash
 npx tailwindcss -i static/css/input.css -o static/css/tailwind.css --minify
@@ -195,12 +263,12 @@ npx tailwindcss -i static/css/input.css -o static/css/tailwind.css --minify
 
 ---
 
-## 7. Hinweise
+## 8. Hinweise
 
-* Das Tool ist ein privates Hilfsmittel für den **eigenen** Account. Es werden nur
-  Daten gelesen, die der angemeldete Account ohnehin im Browser sieht.
-* Da keine offizielle API existiert, können Änderungen an der Schul-Cloud die
-  Abfragen brechen. Anpassungen betreffen dann fast immer nur `schulcloud/client.py`
-  (Endpunkte) und die Selektoren der Scraper-Methoden.
-* Für den Dauerbetrieb hinter einem eigenen Reverse-Proxy unbedingt einen festen
-  `SECRET_KEY`, HTTPS und einen zusätzlichen Zugriffsschutz vorsehen.
+* Das Tool ist ein privates Hilfsmittel für den **eigenen** Account und liest nur Daten,
+  die dieser Account ohnehin im Browser sieht.
+* Ändert die Schul-Cloud ihre Endpunkte, brechen die Abfragen. Anpassungen betreffen
+  dann fast immer nur `schulcloud/client.py`; `python -m schulcloud.check` zeigt sofort,
+  welcher Endpunkt nicht mehr antwortet.
+* Für den Dauerbetrieb hinter einem Reverse-Proxy unbedingt festen `SECRET_KEY`, HTTPS
+  und einen zusätzlichen Zugriffsschutz vorsehen.
