@@ -123,8 +123,12 @@ function itemCard(item) {
 }
 
 function archiveCard(item) {
-  const restore = item.status === 'graded' && !item.done
-    ? '<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] text-emerald-700">bewertet</span>'
+  // Was die Schul-Cloud selbst als abgegeben/bewertet meldet, laesst sich hier
+  // nicht zurueckholen - beim naechsten Laden waere es ohnehin wieder erledigt.
+  const fromSchulCloud = !item.done && ['submitted', 'graded'].includes(item.status);
+  const badge = item.status === 'graded' ? 'bewertet' : 'abgegeben';
+  const restore = fromSchulCloud
+    ? `<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] text-emerald-700">${badge}</span>`
     : '<button class="undo-btn shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium active:bg-slate-100">Zurückholen</button>';
 
   return `
@@ -184,6 +188,12 @@ function render() {
   });
 }
 
+/* Einziger Weg, wie Server-Daten in die Anzeige gelangen. */
+function applyServerData(data) {
+  applyPayload(mergeLocalState(data));
+  syncDoneState(data);   // repariert den Server im Hintergrund
+}
+
 function applyPayload(data) {
   state.active = data.active || [];
   state.archive = data.archive || [];
@@ -218,23 +228,47 @@ function rememberDone(itemId, done) {
   } catch (_) { /* privater Modus o.ae. */ }
 }
 
-/* Fehlt dem Server ein Haken, den dieses Geraet kennt, wird er nachgereicht. */
-async function syncDoneState(data) {
+/* Die Haken dieses Geraets gelten immer - auch wenn der Server sie vergessen
+   hat (beim Gratis-Hosting wird sein Speicher regelmaessig geleert). */
+function mergeLocalState(data) {
   const known = localDone();
   if (!known.size) return data;
 
+  const active = [];
+  const archive = [...(data.archive || [])];
+  for (const item of data.active || []) {
+    if (known.has(item.id)) archive.unshift({ ...item, done: true });
+    else active.push(item);
+  }
+  return { ...data, active, archive, stats: computeStats(active, archive) };
+}
+
+function computeStats(active, archive) {
+  const levels = active.map((i) => i.urgency?.level);
+  const count = (level) => levels.filter((l) => l === level).length;
+  return {
+    open: active.length,
+    overdue: count('overdue'),
+    next24h: count('critical'),
+    next48h: count('critical') + count('warning'),
+    exams: active.filter((i) => i.kind === 'exam').length,
+    done: archive.length,
+  };
+}
+
+/* Fehlt dem Server ein Haken, den dieses Geraet kennt, wird er nachgereicht.
+   Laeuft nebenher; die Anzeige stimmt durch mergeLocalState ohnehin schon. */
+async function syncDoneState(data) {
+  const known = localDone();
+  if (!known.size) return;
+
   const serverDone = new Set((data.archive || []).filter((i) => i.done).map((i) => i.id));
   const missing = [...known].filter((id) => !serverDone.has(id));
-  if (!missing.length) return data;
+  if (!missing.length) return;
 
   try {
-    return await api('/api/items/state/bulk', {
-      method: 'POST',
-      body: JSON.stringify({ done: missing }),
-    });
-  } catch (_) {
-    return data;
-  }
+    await api('/api/items/state/bulk', { method: 'POST', body: JSON.stringify({ done: missing }) });
+  } catch (_) { /* beim naechsten Laden erneut versucht */ }
 }
 
 /* Letzte Antwort lokal sichern, damit die Liste auch ohne Verbindung erscheint. */
@@ -302,8 +336,7 @@ function showLogin() {
 }
 
 async function loadItems() {
-  const data = await api('/api/items');
-  applyPayload(await syncDoneState(data));
+  applyServerData(await api('/api/items'));
 }
 
 let refreshing = false;
@@ -312,7 +345,7 @@ async function refresh(silent = false) {
   refreshing = true;
   el('refresh-icon').classList.add('animate-spin');
   try {
-    applyPayload(await api('/api/refresh', { method: 'POST' }));
+    applyServerData(await api('/api/refresh', { method: 'POST' }));
     if (!silent) toast('Daten aktualisiert');
   } catch (err) {
     const message = String(err.message);
@@ -327,7 +360,7 @@ async function refresh(silent = false) {
 async function setDone(itemId, done, quiet = false) {
   rememberDone(itemId, done);
   try {
-    applyPayload(await api(`/api/items/${encodeURIComponent(itemId)}/done`, {
+    applyServerData(await api(`/api/items/${encodeURIComponent(itemId)}/done`, {
       method: 'POST',
       body: JSON.stringify({ done }),
     }));

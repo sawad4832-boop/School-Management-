@@ -174,7 +174,15 @@ Ausgabe im Erfolgsfall:
 
 ```bash
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q     # 40 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
+.venv/bin/python -m pytest -q     # 41 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
+```
+
+Dazu kommt ein Browsertest (`tests/test_e2e_restart.py`), der prüft, dass ein Haken
+einen Serverneustart mit geleertem Speicher übersteht. Er wird übersprungen, solange
+Playwright fehlt:
+
+```bash
+.venv/bin/pip install playwright && .venv/bin/playwright install chromium
 ```
 
 ---
@@ -288,9 +296,15 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
 * **Farbliche Warnungen:** roter Balken bei überfällig und < 24 h, orange bei < 48 h,
   gelb innerhalb einer Woche, grau danach. Dazu ein Countdown („in 13 Std. 59 Min.").
 * **Abhaken:** Klick auf die Checkbox → Eintrag wandert ins Archiv, dort per
-  „Zurückholen" reversibel. Der Status wird **lokal** in SQLite geführt, weil die
-  Schul-Cloud kein Setzen von außen erlaubt – er bleibt deshalb auch nach einer
-  Aktualisierung erhalten, selbst wenn die Aufgabe dort verschwindet.
+  „Zurückholen" reversibel. Die Schul-Cloud erlaubt kein Setzen von außen, der
+  Status wird deshalb selbst geführt – und zwar **doppelt**: im Browser
+  (`localStorage`) und auf dem Server (SQLite). Beim Anzeigen gewinnt immer die
+  Kopie des Geräts; fehlt dem Server ein Haken, wird er ihm nachgereicht. So
+  überleben Haken auch das Leeren des Serverspeichers, wie es bei kostenlosen
+  Hosting-Angeboten bei jedem Neustart passiert.
+* **Abgegeben heißt erledigt:** Aufgaben, die die Schul-Cloud als eingereicht
+  oder bewertet meldet, wandern von selbst ins Archiv und stehen nicht mehr
+  unter „offen".
 * **Kennzahlen:** offen, überfällig, nächste 24 h / 48 h, Tests, erledigt.
 * **Filter** nach Typ (Aufgaben / Tests / dringend), Kurs und Volltextsuche.
 
@@ -330,7 +344,7 @@ static/icons/             App-Symbole fuer den Homebildschirm
 Dockerfile                fuer den Dauerbetrieb auf einem eigenen Server
 render.yaml               Bauplan fuer die Einrichtung bei Render (vom Handy aus)
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite (40 Tests)
+tests/                    pytest-Suite (41 Tests + Browsertest)
 ```
 
 ### Ohne CDN betreiben

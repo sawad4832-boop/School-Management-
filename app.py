@@ -209,9 +209,9 @@ def view_items(entry: dict[str, Any]) -> dict[str, Any]:
         item["done"] = bool(state.get("done"))
         item["done_at"] = state.get("done_at")
         item["note"] = state.get("note", "")
-        # Bewertete und in der Schul-Cloud bereits abgeschlossene Aufgaben
-        # gelten automatisch als erledigt.
-        if item["done"] or item["status"] == "graded" or item.get("finished"):
+        # Was in der Schul-Cloud abgegeben, bewertet oder abgeschlossen ist,
+        # gilt als erledigt - genau wie ein selbst gesetzter Haken.
+        if item["done"] or item["status"] in ("submitted", "graded") or item.get("finished"):
             archive.append(item)
         else:
             active.append(item)

@@ -233,3 +233,13 @@ def test_no_data_without_session(client):
     assert client.post(f"/api/items/{item_id}/done", json={"done": False}).status_code == 401
     assert client.post("/api/items/state/bulk", json={"done": [item_id]}).status_code == 401
     assert client.post(f"/api/items/{item_id}/note", json={"note": "x"}).status_code == 401
+
+
+def test_submitted_tasks_leave_the_todo_list(client):
+    """In der Schul-Cloud abgegebene Aufgaben stehen nicht mehr unter "offen"."""
+    login_demo(client)
+    data = client.get("/api/items").get_json()
+
+    assert all(i["status"] == "open" for i in data["active"])
+    archived = {i["status"] for i in data["archive"]}
+    assert "submitted" in archived and "graded" in archived
