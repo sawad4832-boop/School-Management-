@@ -416,12 +416,28 @@ def api_logout():
     return jsonify({"ok": True})
 
 
+EMPTY_VIEW = {
+    "active": [],
+    "archive": [],
+    "stats": {"open": 0, "overdue": 0, "next24h": 0, "next48h": 0, "exams": 0, "done": 0},
+    "last_sync": None,
+    "warnings": [],
+    "sources": {},
+    "mode": None,
+}
+
+
 @app.get("/api/items")
 def api_items():
+    """Aufgaben der angemeldeten Sitzung.
+
+    Ohne Sitzung wird bewusst nichts herausgegeben - auch nicht der lokale
+    Zwischenspeicher. Sonst waere die Aufgabenliste auf einer oeffentlich
+    erreichbaren Adresse ohne Anmeldung lesbar.
+    """
     entry = current_session(required=False)
     if entry is None:
-        # Ohne Session nur der lokale Cache (z.B. nach einem Neustart).
-        return jsonify({"logged_in": False, **view_items({"mode": "cache"})})
+        return jsonify({"logged_in": False, **EMPTY_VIEW})
     return jsonify({"logged_in": True, **view_items(entry)})
 
 
@@ -441,8 +457,8 @@ def api_refresh():
 def api_set_done(item_id: str):
     payload = request.get_json(silent=True) or {}
     done = bool(payload.get("done", True))
+    entry = current_session()
     store.set_done(item_id, done)
-    entry = current_session(required=False) or {"mode": "cache"}
     return jsonify({"ok": True, "item_id": item_id, "done": done, **view_items(entry)})
 
 
@@ -457,6 +473,7 @@ def api_bulk_state():
     payload = request.get_json(silent=True) or {}
     done_ids = [str(i) for i in (payload.get("done") or [])][:500]
 
+    entry = current_session()
     states = store.states()
     restored = 0
     for item_id in done_ids:
@@ -464,15 +481,14 @@ def api_bulk_state():
             store.set_done(item_id, True)
             restored += 1
 
-    entry = current_session(required=False) or {"mode": "cache"}
     return jsonify({"ok": True, "restored": restored, **view_items(entry)})
 
 
 @app.post("/api/items/<path:item_id>/note")
 def api_set_note(item_id: str):
     payload = request.get_json(silent=True) or {}
+    entry = current_session()
     store.set_note(item_id, (payload.get("note") or "").strip())
-    entry = current_session(required=False) or {"mode": "cache"}
     return jsonify({"ok": True, **view_items(entry)})
 
 

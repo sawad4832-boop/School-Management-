@@ -215,3 +215,21 @@ def test_bulk_restores_checkmarks_after_data_loss(client):
 
     # Nochmal dieselbe Meldung aendert nichts mehr
     assert client.post("/api/items/state/bulk", json={"done": [item_id]}).get_json()["restored"] == 0
+
+
+def test_no_data_without_session(client):
+    """Ohne Anmeldung darf nichts herausgehen - die Adresse ist oeffentlich."""
+    login_demo(client)
+    item_id = client.get("/api/items").get_json()["active"][0]["id"]
+    client.post(f"/api/items/{item_id}/done", json={"done": True})
+    client.post("/api/logout")
+
+    data = client.get("/api/items").get_json()
+    assert data["logged_in"] is False
+    assert data["active"] == [] and data["archive"] == []
+    assert data["stats"]["open"] == 0
+
+    # Auch Schreibzugriffe sind ohne Anmeldung gesperrt
+    assert client.post(f"/api/items/{item_id}/done", json={"done": False}).status_code == 401
+    assert client.post("/api/items/state/bulk", json={"done": [item_id]}).status_code == 401
+    assert client.post(f"/api/items/{item_id}/note", json={"note": "x"}).status_code == 401

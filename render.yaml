@@ -15,8 +15,11 @@ services:
         value: "3.12.6"
       - key: SECRET_KEY
         generateValue: true          # wird von Render erzeugt und bleibt bestehen
+      # Beim Einrichten abgefragt: eine selbst gewählte Zahl als zusätzliches
+      # Schloss vor der Seite. Frei änderbar unter "Environment", und ein leerer
+      # Wert schaltet die Abfrage ab (die Schul-Cloud-Anmeldung bleibt nötig).
       - key: SC_DASHBOARD_PIN
-        sync: false                  # wird beim Einrichten abgefragt (PIN wählen!)
+        sync: false
       - key: SC_BASE_URL
         value: https://brandenburg.cloud
       - key: SC_REFRESH_MINUTES

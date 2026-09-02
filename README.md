@@ -29,14 +29,28 @@ etwa fünf Minuten und kostet nichts. Im Projekt liegt dafür ein fertiger Baupl
 2. Oben auf **New +** → **Blueprint**.
 3. Das Repository **School-Management-** auswählen. Der Bauplan wird automatisch
    gefunden; er zeigt auf den Branch `claude/schulcloud-dashboard-y2fwoc`.
-4. Render fragt nach **SC_DASHBOARD_PIN** – hier eine selbst ausgedachte Zahl
-   eintragen (4–6 Ziffern). Sie schützt die Seite, damit niemand sonst deine
-   Aufgaben sieht.
+4. Render fragt nach **SC_DASHBOARD_PIN**. Das ist **keine vorgegebene Zahl** –
+   du denkst dir hier selbst eine aus (4–6 Ziffern) und merkst sie dir. Sie ist ein
+   zusätzliches Schloss vor der Seite. Das Feld darf auch leer bleiben; dann
+   entfällt die Abfrage und es zählt nur die Anmeldung an der Schul-Cloud.
 5. **Apply** drücken und zwei bis drei Minuten warten, bis „Live" erscheint.
 6. Die angezeigte Adresse öffnen (etwa `https://schulcloud-dashboard-xxxx.onrender.com`):
    erst die PIN, dann die Schul-Cloud-Zugangsdaten eingeben.
 7. In Safari unten auf **Teilen** → **Zum Home-Bildschirm**. Fertig – ab jetzt
    liegt „Aufgaben" als App auf dem Homebildschirm.
+
+### PIN vergessen oder nie vergeben?
+
+Kein Problem, sie lässt sich jederzeit überschreiben – die alte muss man dafür
+nicht kennen:
+
+1. In Render den Dienst **schulcloud-dashboard** öffnen.
+2. Links auf **Environment**.
+3. Bei **SC_DASHBOARD_PIN** auf den Wert tippen, die gewünschte Zahl eintragen
+   und **Save changes** drücken. (Leer lassen schaltet die Abfrage ab.)
+4. Render startet den Dienst neu; nach etwa einer Minute gilt die neue PIN.
+
+Lokal steht derselbe Wert in der Datei `.env`.
 
 **Was du dabei wissen solltest**
 
@@ -160,7 +174,7 @@ Ausgabe im Erfolgsfall:
 
 ```bash
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q     # 39 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
+.venv/bin/python -m pytest -q     # 40 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
 ```
 
 ---
@@ -204,7 +218,10 @@ unter „Alternative: Session-Token" einfügen – oder die Browser-Erweiterung 
 * Das Passwort wird nur zum Login durchgereicht und **nie gespeichert**.
 * JWT und Session liegen ausschließlich im Arbeitsspeicher des lokalen Servers
   (`SESSIONS` in `app.py`) – nach einem Neustart ist eine neue Anmeldung nötig.
-* In SQLite landen nur Aufgaben-Metadaten und der eigene Abhak-Status.
+* In SQLite landen nur Aufgaben-Metadaten und der eigene Abhak-Status. Ohne
+  angemeldete Sitzung geben die Endpunkte davon nichts heraus – auf einer
+  öffentlich erreichbaren Adresse ist die Aufgabenliste also nicht ohne
+  Anmeldung lesbar.
 * Der Server bindet standardmäßig auf `127.0.0.1` und ist nicht von außen erreichbar.
 
 ### Aktualisierung
@@ -313,7 +330,7 @@ static/icons/             App-Symbole fuer den Homebildschirm
 Dockerfile                fuer den Dauerbetrieb auf einem eigenen Server
 render.yaml               Bauplan fuer die Einrichtung bei Render (vom Handy aus)
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite (39 Tests)
+tests/                    pytest-Suite (40 Tests)
 ```
 
 ### Ohne CDN betreiben

@@ -75,7 +75,10 @@
     <section id="pin-view" class="hidden">
       <div class="mx-auto mt-8 max-w-xs rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
         <h2 class="text-lg font-semibold">PIN eingeben</h2>
-        <p class="mt-1 text-sm text-slate-500">Dieses Dashboard ist mit einer PIN geschützt.</p>
+        <p class="mt-1 text-sm text-slate-500">
+          Das ist die PIN, die beim Einrichten unter <code>SC_DASHBOARD_PIN</code>
+          vergeben wurde – keine Zahl der Schul-Cloud.
+        </p>
         <form id="pin-form" class="mt-5 space-y-3">
           <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
                  class="w-full rounded-xl border border-slate-300 px-3 py-3 text-center text-2xl tracking-[0.4em] focus:border-ink focus:outline-none">
@@ -85,6 +88,16 @@
             Weiter
           </button>
         </form>
+        <details class="mt-4 text-left text-xs text-slate-500">
+          <summary class="cursor-pointer font-medium">PIN vergessen?</summary>
+          <p class="mt-2">
+            Die PIN lässt sich jederzeit neu setzen – sie steht als Variable
+            <code>SC_DASHBOARD_PIN</code> in den Einstellungen des Servers
+            (beim Hoster unter „Environment", lokal in der Datei <code>.env</code>).
+            Wert ändern, Server neu starten, fertig. Ein leerer Wert schaltet die
+            PIN-Abfrage ab; die Anmeldung an der Schul-Cloud bleibt davon unberührt.
+          </p>
+        </details>
       </div>
     </section>
 
