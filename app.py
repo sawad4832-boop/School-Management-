@@ -169,14 +169,21 @@ def _display_name(user: dict) -> str:
 # ----------------------------------------------------------------------
 # Datenabruf
 # ----------------------------------------------------------------------
-def sync(entry: dict[str, Any]) -> dict[str, Any]:
-    """Holt frische Daten, mischt lokalen Status dazu und cached sie."""
+def sync(entry: dict[str, Any], scan_topics: Optional[bool] = None) -> dict[str, Any]:
+    """Holt frische Daten, mischt lokalen Status dazu und cached sie.
+
+    ``scan_topics=False`` laesst die Kursthemen aus. Beim Anmelden ist das
+    wichtig: der Durchlauf kostet viele Abrufe, und solange er laeuft, wartet
+    der Nutzer vor einem scheinbar toten Knopf.
+    """
     if entry["mode"] == "demo":
         fetch = demo_data.demo_fetch()
         source = "demo"
     else:
         client: SchulCloudClient = entry["client"]
-        fetch = client.fetch_all(scan_topics=SCAN_TOPICS)
+        fetch = client.fetch_all(
+            scan_topics=SCAN_TOPICS if scan_topics is None else scan_topics
+        )
         source = client.strategy
 
     items = parser.build_items(
@@ -434,9 +441,16 @@ def api_login():
 
     entry = _new_session(client, user, "live")
     try:
-        sync(entry)
+        # Ohne Kursthemen: die Anmeldung soll sofort zurueckkommen. Die Themen
+        # holt die erste Aktualisierung nach, die das Frontend selbst ausloest.
+        sync(entry, scan_topics=False)
     except AuthError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 401
+    except SchulCloudError as exc:
+        # Angemeldet ist angemeldet - die Daten kommen beim naechsten Versuch.
+        log.warning("Erster Datenabruf fehlgeschlagen: %s", exc)
+        entry["warnings"] = [f"Daten konnten noch nicht geladen werden: {exc}"]
+
     _remember(entry)
     return jsonify({"ok": True, "user": _display_name(user), "mode": "live", "strategy": client.strategy})
 

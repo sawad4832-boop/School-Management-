@@ -283,3 +283,44 @@ def test_topics_are_cached_between_refreshes():
     third = client.fetch_all(topics_ttl=0)
     assert third.sources["topics"] == "api/v3+html"
     assert len(client.session.calls) > calls_after_first
+
+
+def test_topic_scan_stops_when_time_runs_out(monkeypatch):
+    """Antwortet die Schul-Cloud langsam, bricht der Durchlauf ab."""
+    import schulcloud.client as client_module
+
+    uhr = {"jetzt": 1000.0}
+    monkeypatch.setattr(client_module.time, "monotonic", lambda: uhr["jetzt"])
+
+    client = make_client({("GET", "/board"): FakeResponse(json_data={"elements": []})})
+    original = client.session.get
+
+    def langsam(*args, **kwargs):
+        uhr["jetzt"] += 5          # jeder Abruf kostet 5 Sekunden
+        return original(*args, **kwargs)
+
+    client.session.get = langsam
+    courses = [{"_id": f"c{n}", "name": f"Kurs {n}"} for n in range(12)]
+
+    client.fetch_course_topics(courses, max_requests=45, max_seconds=20)
+    assert len(client.session.calls) <= 5, "nach 20 Sekunden ist Schluss"
+
+
+def test_topic_requests_use_a_short_timeout():
+    """Ein haengender Abruf darf nicht 25 Sekunden blockieren."""
+    from schulcloud.client import TOPIC_TIMEOUT
+
+    assert TOPIC_TIMEOUT <= 10
+
+    gesehen = []
+
+    class Mitschrift(FakeSession):
+        def get(self, url, params=None, timeout=None, **kw):
+            gesehen.append(timeout)
+            return self._lookup("GET", url)
+
+    client = SchulCloudClient("https://brandenburg.cloud")
+    client.session = Mitschrift({("GET", "/board"): FakeResponse(json_data={"elements": []})})
+    client.fetch_course_topics([{"_id": "c1", "name": "Kurs"}])
+
+    assert gesehen and all(t == TOPIC_TIMEOUT for t in gesehen)

@@ -55,6 +55,10 @@ USER_AGENT = (
 # Praefixe der aelteren Feathers-API (Fallback fuer abweichende Instanzen).
 LEGACY_PREFIXES = ("/api/v1", "/api", "")
 
+# Kurzes Zeitlimit fuer die vielen kleinen Themen-Abrufe: ein haengender
+# Abruf darf den Durchlauf nicht blockieren.
+TOPIC_TIMEOUT = 8
+
 
 class SchulCloudError(RuntimeError):
     """Allgemeiner Fehler beim Zugriff auf die Schul-Cloud."""
@@ -272,9 +276,11 @@ class SchulCloudClient:
     # ------------------------------------------------------------------
     # HTTP-Helfer
     # ------------------------------------------------------------------
-    def _request_json(self, url: str, params: Optional[dict] = None) -> Any:
+    def _request_json(
+        self, url: str, params: Optional[dict] = None, timeout: Optional[int] = None
+    ) -> Any:
         try:
-            resp = self.session.get(url, params=params, timeout=self.timeout)
+            resp = self.session.get(url, params=params, timeout=timeout or self.timeout)
         except requests.RequestException as exc:
             log.debug("GET %s fehlgeschlagen: %s", url, exc)
             return None
@@ -285,10 +291,10 @@ class SchulCloudClient:
             return None
         return _json_or_none(resp)
 
-    def _v3(self, resource: str, params: Optional[dict] = None) -> Any:
+    def _v3(self, resource: str, params: Optional[dict] = None, timeout: Optional[int] = None) -> Any:
         """Ruft einen Endpunkt der aktuellen API (``/api/v3``) ab."""
         base = self.api_url or self.base_url
-        return self._request_json(f"{base}/api/v3/{resource.lstrip('/')}", params)
+        return self._request_json(f"{base}/api/v3/{resource.lstrip('/')}", params, timeout)
 
     def _legacy_roots(self) -> Iterable[str]:
         if self._legacy_root:
@@ -307,10 +313,10 @@ class SchulCloudClient:
                 return data
         return None
 
-    def _get_soup(self, path: str) -> Optional[BeautifulSoup]:
+    def _get_soup(self, path: str, timeout: Optional[int] = None) -> Optional[BeautifulSoup]:
         url = urljoin(self.base_url + "/", path.lstrip("/"))
         try:
-            resp = self.session.get(url, timeout=self.timeout)
+            resp = self.session.get(url, timeout=timeout or self.timeout)
         except requests.RequestException as exc:
             log.debug("HTML-Abruf %s fehlgeschlagen: %s", url, exc)
             return None
@@ -411,6 +417,7 @@ class SchulCloudClient:
         courses: list[dict],
         max_courses: int = 12,
         max_requests: int = 45,
+        max_seconds: float = 20.0,
     ) -> list[dict]:
         """Liest die Themen der Kurse - dort kuendigen Lehrkraefte oft an.
 
@@ -424,14 +431,14 @@ class SchulCloudClient:
         ``max_requests`` deckelt die Zahl der Abrufe, damit eine Aktualisierung
         nicht minutenlang dauert.
         """
-        budget = _Budget(max_requests)
+        budget = _Budget(max_requests, max_seconds)
         topics: list[dict] = []
 
         for course in courses[:max_courses]:
             course_id = course.get("_id")
             if not course_id or not budget.take():
                 continue
-            board = self._v3(f"course-rooms/{course_id}/board")
+            board = self._v3(f"course-rooms/{course_id}/board", timeout=TOPIC_TIMEOUT)
             if not isinstance(board, dict):
                 continue
 
@@ -465,7 +472,9 @@ class SchulCloudClient:
         if budget.take():
             soup = None
             try:
-                soup = self._get_soup(f"/courses/{course['_id']}/topics/{lesson_id}")
+                soup = self._get_soup(
+                    f"/courses/{course['_id']}/topics/{lesson_id}", timeout=TOPIC_TIMEOUT
+                )
             except AuthError:
                 raise
             except Exception:  # pragma: no cover - Netzwerkausfall
@@ -494,7 +503,7 @@ class SchulCloudClient:
         """Spalten-Board: Karten einsammeln und deren Texte zusammenfassen."""
         if not budget.take():
             return []
-        board = self._v3(f"boards/{board_id}")
+        board = self._v3(f"boards/{board_id}", timeout=TOPIC_TIMEOUT)
         if not isinstance(board, dict):
             return []
 
@@ -507,7 +516,7 @@ class SchulCloudClient:
         if not card_ids or not budget.take():
             return []
 
-        cards = self._v3("cards", {"ids": card_ids[:30]})
+        cards = self._v3("cards", {"ids": card_ids[:30]}, timeout=TOPIC_TIMEOUT)
         entries = _v3_list(cards)
         found = []
         for position, card in enumerate(entries):
@@ -627,13 +636,18 @@ def _extract_csrf(html: str) -> Optional[str]:
 
 
 class _Budget:
-    """Zaehlt Abrufe herunter, damit ein Kursdurchlauf begrenzt bleibt."""
+    """Deckelt einen Kursdurchlauf - nach Abrufen und nach Zeit.
 
-    def __init__(self, limit: int) -> None:
+    Die Zahl allein genuegt nicht: antwortet die Schul-Cloud langsam, dauert
+    der Durchlauf trotzdem Minuten. Deshalb zusaetzlich eine Frist.
+    """
+
+    def __init__(self, limit: int, seconds: float = 20.0) -> None:
         self.left = limit
+        self.deadline = time.monotonic() + seconds
 
     def take(self) -> bool:
-        if self.left <= 0:
+        if self.left <= 0 or time.monotonic() > self.deadline:
             return False
         self.left -= 1
         return True

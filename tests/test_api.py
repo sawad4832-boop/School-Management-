@@ -300,3 +300,57 @@ def test_old_board_cards_do_not_appear(client):
     titles = {i["title"] for i in data["active"]} | {i["title"] for i in data["archive"]}
     assert "Thema 2: Mittelalter" not in titles
     assert "Thema 7: Nationalsozialismus" in titles      # die aktuelle bleibt
+
+
+def test_login_does_not_scan_topics(client, monkeypatch):
+    """Der Login muss sofort antworten - Kursthemen kommen erst danach.
+
+    Sie kosten bis zu 45 zusaetzliche Abrufe; laufen die beim Anmelden mit,
+    steht der Nutzer minutenlang vor einem scheinbar toten Knopf.
+    """
+    import app as app_module
+    from schulcloud.client import FetchResult
+
+    gerufen = []
+
+    class FakeClient:
+        strategy = "api"
+        jwt = "jwt-test"
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def login(self, username, password):
+            return {"_id": "u1", "firstName": "Mia", "lastName": "Muster"}
+
+        def fetch_all(self, scan_topics=True, **kwargs):
+            gerufen.append(scan_topics)
+            return FetchResult(courses=[], tasks=[])
+
+        def logout(self):
+            pass
+
+    monkeypatch.setattr(app_module, "SchulCloudClient", FakeClient)
+
+    res = client.post("/api/login", json={"username": "mia@example.org", "password": "geheim"})
+    assert res.get_json()["ok"] is True
+    assert gerufen == [False], "beim Anmelden duerfen die Kursthemen nicht geladen werden"
+
+    client.post("/api/refresh")
+    assert gerufen[-1] is app_module.SCAN_TOPICS, "danach gilt wieder die Einstellung"
+
+
+def test_username_field_accepts_names_without_at_sign(client):
+    """Die Schul-Cloud erlaubt Benutzernamen ohne @.
+
+    Mit type="email" verweigert der Browser das Absenden kommentarlos - fuer
+    den Nutzer "passiert dann einfach nichts".
+    """
+    import re
+
+    body = client.get("/").get_data(as_text=True)
+    feld = re.search(r'<input[^>]*id="username"[^>]*>', body).group(0)
+
+    assert 'type="text"' in feld
+    assert 'type="email"' not in feld
+    assert 'inputmode="email"' in feld     # passende Tastatur bleibt erhalten

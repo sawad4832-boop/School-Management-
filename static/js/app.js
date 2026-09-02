@@ -37,11 +37,28 @@ window.addEventListener('unhandledrejection', (e) =>
   showFatal((e.reason && e.reason.message) || 'Unbekannter Fehler'));
 
 const api = async (path, options = {}) => {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    ...options,
-  });
+  // Zeitlimit, damit eine haengende Anfrage nicht als "es passiert nichts"
+  // endet. Der Server darf beim Aufwachen langsam sein, aber nicht endlos.
+  const { timeoutMs = 120000, ...rest } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      signal: controller.signal,
+      ...rest,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === 'AbortError') {
+      throw new Error('Der Server hat zu lange nicht geantwortet. Bitte noch einmal versuchen.');
+    }
+    throw new Error('Keine Verbindung zum Server.');
+  }
+  clearTimeout(timer);
   let data = {};
   try { data = await res.json(); } catch (_) { /* leere Antwort */ }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -409,17 +426,34 @@ async function setDone(itemId, done, quiet = false) {
 async function login(payload) {
   const btn = el('btn-login');
   const error = el('login-error');
+  const label = btn.textContent;
+
   btn.disabled = true;
+  btn.textContent = 'Anmeldung läuft …';
   error.classList.add('hidden');
+
+  // Nach 8 Sekunden ohne Antwort erklaeren, warum es dauert.
+  const hint = setTimeout(() => {
+    error.textContent = 'Der Server wacht gerade auf – das dauert bis zu einer Minute.';
+    error.className = 'rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-600';
+    error.classList.remove('hidden');
+  }, 8000);
+
   try {
     const res = await api('/api/login', { method: 'POST', body: JSON.stringify(payload) });
     showDashboard(res);
     await loadItems();
+    // Kursthemen kosten viele Abrufe und laufen deshalb erst jetzt, im
+    // Hintergrund - die Liste steht dadurch sofort.
+    refresh(true).catch(() => {});
   } catch (err) {
     error.textContent = err.message;
+    error.className = 'rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700';
     error.classList.remove('hidden');
   } finally {
+    clearTimeout(hint);
     btn.disabled = false;
+    btn.textContent = label;
   }
 }
 
