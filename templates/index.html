@@ -147,8 +147,15 @@
               Alternative: Session-Token (JWT)
             </summary>
             <p class="mt-2 text-xs text-slate-500">
-              Bei Zwei-Faktor-Anmeldung oder SSO: in der Schul-Cloud anmelden, den Cookie
-              <code>jwt</code> kopieren und hier einfügen.
+              Nötig, wenn die Anmeldung oben abgelehnt wird – etwa bei Anmeldung über ein
+              Schulportal (SSO) oder mit Zwei-Faktor-Anmeldung.
+            </p>
+            <p class="mt-2 text-xs text-slate-500">
+              <span class="font-medium">Dafür wird ein Computer gebraucht:</span> Safari auf dem
+              iPhone hat keine Entwicklertools, und der Cookie lässt sich dort nicht auslesen.
+              Am Rechner in der Schul-Cloud anmelden, in den Entwicklertools unter
+              „Anwendung → Cookies" den Wert von <code>jwt</code> kopieren und hier einfügen –
+              oder die Browser-Erweiterung aus dem Ordner <code>browser-extension/</code> nutzen.
             </p>
             <textarea id="jwt" rows="3" placeholder="eyJhbGciOi…" autocapitalize="none" autocorrect="off"
                       class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-xs"></textarea>

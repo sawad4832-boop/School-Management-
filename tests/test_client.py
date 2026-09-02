@@ -109,15 +109,45 @@ def test_api_login_uses_v3_endpoint_and_sets_bearer():
     assert user["school"] == "Beispielschule"
 
 
-def test_wrong_password_stops_immediately():
-    """Bei 401 darf nicht auch noch der Formular-Login versucht werden."""
+def test_rejected_api_login_still_tries_the_form():
+    """Ein 401 der API heisst nicht zwingend "falsches Passwort".
+
+    Nutzt die Schule ein Schulportal oder ist die lokale Anmeldung
+    abgeschaltet, antwortet der API-Endpunkt ebenfalls mit 401, waehrend das
+    Formular funktioniert. Frueher wurde hier abgebrochen.
+    """
     client = make_client({
         ("POST", "/api/v3/authentication/local"): FakeResponse(status=401, json_data={"code": 401}),
+        ("GET", "/login"): FakeResponse(text=LOGIN_HTML, url="https://brandenburg.cloud/login"),
+        ("POST", "/login"): FakeResponse(text="ok", url="https://brandenburg.cloud/dashboard"),
+        ("GET", "/api/v3/me"): ME_RESPONSE,
     })
-    with pytest.raises(AuthError, match="nicht akzeptiert"):
+    client.session.cookies.set("jwt", "cookie-jwt")
+
+    user = client.login("mia@example.org", "geheim")
+    assert client.strategy == "form"
+    assert user["firstName"] == "Mia"
+
+
+def test_failed_login_names_the_reason_and_the_way_out():
+    client = make_client({
+        ("POST", "/api/v3/authentication/local"): FakeResponse(
+            status=401, json_data={"message": "Unauthorized", "code": 401}),
+        ("GET", "/login"): FakeResponse(text=LOGIN_HTML, url="https://brandenburg.cloud/login"),
+        ("POST", "/login"): FakeResponse(
+            text="Login fehlgeschlagen", url="https://brandenburg.cloud/login?redirect=%2F"),
+    })
+    with pytest.raises(AuthError) as fehler:
         client.login("mia@example.org", "falsch")
 
-    assert not any(url.endswith("/login") for _, url in client.session.calls)
+    text = str(fehler.value)
+    assert "Session-Token" in text        # Ausweg wird genannt
+    assert "Unauthorized" in text         # Antwort der Schul-Cloud wird gezeigt
+
+    # Hoechstens zwei Anmeldeversuche - sonst droht eine Sperre
+    versuche = [url for methode, url in client.session.calls
+                if methode == "POST" and ("authentication" in url or url.endswith("/login"))]
+    assert len(versuche) == 2
 
 
 def test_form_login_sends_csrf_token_and_takes_cookie():

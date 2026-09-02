@@ -114,15 +114,22 @@ class SchulCloudClient:
     # Login
     # ------------------------------------------------------------------
     def login(self, username: str, password: str) -> dict[str, Any]:
-        """Meldet sich an: erst ueber die JSON-API, dann ueber das Formular."""
+        """Meldet sich an: erst ueber die JSON-API, dann ueber das Formular.
+
+        Beide Wege werden auch dann versucht, wenn der erste mit 401 antwortet.
+        Ein abgelehnter API-Login heisst naemlich nicht zwingend "falsches
+        Passwort": nutzt die Schule ein Schulportal oder ist die lokale
+        Anmeldung abgeschaltet, antwortet dieser Endpunkt ebenfalls mit 401,
+        waehrend das Formular funktioniert. Zwei Versuche bleiben deutlich
+        unter jeder Sperrschwelle.
+        """
         errors: list[str] = []
+        rejected = False
         for strategy in (self._login_api, self._login_form):
             try:
                 strategy(username, password)
             except AuthError as exc:
-                # Falsche Zugangsdaten sind endgueltig - nicht weiter probieren.
-                if getattr(exc, "final", False):
-                    raise
+                rejected = rejected or getattr(exc, "final", False)
                 errors.append(str(exc))
                 continue
             except requests.RequestException as exc:
@@ -130,7 +137,16 @@ class SchulCloudClient:
                 continue
             self.user = self._load_me()
             return self.user
-        raise AuthError("Login nicht möglich: " + "; ".join(errors))
+
+        detail = " | ".join(errors)
+        if rejected:
+            raise AuthError(
+                "Die Schul-Cloud hat die Anmeldung abgelehnt. Falls die Daten stimmen: "
+                "Meldet sich deine Schule über ein Schulportal (SSO) an oder ist eine "
+                "Zwei-Faktor-Anmeldung aktiv, funktioniert dieser Weg nicht – nimm dann "
+                f"das Session-Token. ({detail})"
+            )
+        raise AuthError(f"Anmeldung nicht möglich. ({detail})")
 
     def login_with_jwt(self, jwt: str) -> dict[str, Any]:
         """Uebernimmt ein bestehendes JWT (Browser-Erweiterung / Cookie)."""
@@ -168,12 +184,10 @@ class SchulCloudClient:
                     return
                 last = f"Antwort ohne accessToken von {url}"
             elif resp.status_code in (400, 401, 403):
-                # Der Endpunkt existiert und lehnt die Daten ab.
-                raise _final_auth_error(
-                    "Benutzername oder Passwort wurde nicht akzeptiert. "
-                    "Bei Anmeldung über die Schul-Cloud-App/SSO bitte den Weg "
-                    "über das Session-Token nutzen."
-                )
+                # Der Endpunkt existiert und lehnt ab. Was genau, sagt der Body -
+                # das gehoert in die Meldung, sonst steht der Nutzer vor einem
+                # blossen "fehlgeschlagen".
+                raise _final_auth_error(f"API {resp.status_code}: {_error_detail(resp)}")
             else:
                 last = f"HTTP {resp.status_code} bei {url}"
         raise AuthError(f"API-Login nicht verfügbar ({last or 'kein Endpunkt gefunden'})")
@@ -209,10 +223,9 @@ class SchulCloudClient:
         body = resp.text or ""
         if "/login" in resp.url:
             raise _final_auth_error(
-                "Benutzername oder Passwort wurde nicht akzeptiert."
+                "Formular: Zugangsdaten abgelehnt"
                 if _looks_like_login_error(body)
-                else "Login wurde abgewiesen (evtl. Zwei-Faktor-Anmeldung). "
-                     "Bitte den Weg über das Session-Token nutzen."
+                else f"Formular: Anmeldung abgewiesen (HTTP {resp.status_code})"
             )
         match = re.search(r'"(?:accessToken|jwt)"\s*:\s*"([A-Za-z0-9._-]{20,})"', body)
         if match:
@@ -684,6 +697,18 @@ def _collect_text(node: Any, depth: int = 0) -> str:
         for value in node[:50]:
             parts.append(_collect_text(value, depth + 1))
     return " ".join(p for p in parts if p).strip()
+
+
+def _error_detail(resp: requests.Response) -> str:
+    """Kurzfassung der Fehlerantwort - hilft beim Einordnen einer Ablehnung."""
+    data = _json_or_none(resp)
+    if isinstance(data, dict):
+        for key in ("message", "title", "error", "type"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                return value[:120]
+    text = (resp.text or "").strip()
+    return text[:120] if text else "ohne Angabe"
 
 
 def _json_or_none(resp: requests.Response) -> Any:

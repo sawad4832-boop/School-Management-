@@ -450,6 +450,16 @@ async function login(payload) {
     error.textContent = err.message;
     error.className = 'rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700';
     error.classList.remove('hidden');
+
+    // Hat die Schul-Cloud abgelehnt, ist das Session-Token der naechste Weg -
+    // also aufklappen statt nur davon zu schreiben.
+    if (/abgelehnt|Session-Token|nicht möglich/i.test(err.message)) {
+      const alternative = document.querySelector('#login-form details');
+      if (alternative) {
+        alternative.open = true;
+        alternative.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
   } finally {
     clearTimeout(hint);
     btn.disabled = false;
@@ -478,9 +488,21 @@ async function start() {
   setBooting(true);
   on('login-form', 'submit', (event) => {
     event.preventDefault();
+    const password = el('password').value;
+
+    // Beim Einfuegen auf dem Handy rutscht leicht ein Leerzeichen mit hinein.
+    // Das sieht man nicht und die Schul-Cloud lehnt dann ab.
+    if (password && password !== password.trim()) {
+      const error = el('login-error');
+      error.textContent = 'Im Passwort steht ein Leerzeichen am Anfang oder Ende. '
+        + 'Bitte prüfen – es wird mitgesendet.';
+      error.className = 'rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800';
+      error.classList.remove('hidden');
+    }
+
     login({
-      username: el('username').value,
-      password: el('password').value,
+      username: el('username').value.trim(),
+      password,
       jwt: el('jwt').value,
     });
   });
