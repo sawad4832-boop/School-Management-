@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional
@@ -72,7 +73,8 @@ class FetchResult:
     homework: list[dict] = field(default_factory=list)     # Legacy/HTML
     submissions: list[dict] = field(default_factory=list)  # Legacy
     events: list[dict] = field(default_factory=list)       # Kalender
-    lessons: list[dict] = field(default_factory=list)      # Kursthemen
+    lessons: list[dict] = field(default_factory=list)      # Kursthemen (alt)
+    topics: list[dict] = field(default_factory=list)       # Kursthemen (Board/Text)
     news: list[dict] = field(default_factory=list)         # Ankuendigungen
     sources: dict[str, str] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -100,6 +102,9 @@ class SchulCloudClient:
         self.user: dict[str, Any] = {}
         self.strategy: str = "none"
         self._legacy_root: Optional[str] = None
+        # Kursthemen kosten viele Abrufe; sie werden zwischengespeichert.
+        self._topics: list[dict] = []
+        self._topics_read: float = 0.0
 
     # ------------------------------------------------------------------
     # Login
@@ -318,7 +323,9 @@ class SchulCloudClient:
     # ------------------------------------------------------------------
     # Datenabruf
     # ------------------------------------------------------------------
-    def fetch_all(self, days_ahead: int = 120) -> FetchResult:
+    def fetch_all(
+        self, days_ahead: int = 120, scan_topics: bool = True, topics_ttl: float = 1800
+    ) -> FetchResult:
         """Laedt Kurse, Aufgaben, Ankuendigungen und Termine."""
         result = FetchResult()
 
@@ -379,7 +386,138 @@ class SchulCloudClient:
         if result.lessons:
             result.sources["lessons"] = "api/v1"
 
+        if scan_topics and result.courses:
+            fresh = (time.monotonic() - self._topics_read) < topics_ttl
+            if fresh and self._topics:
+                result.topics = self._topics
+                result.sources["topics"] = "zwischenspeicher"
+            else:
+                try:
+                    self._topics = self.fetch_course_topics(result.courses)
+                    self._topics_read = time.monotonic()
+                    result.topics = self._topics
+                except AuthError:
+                    raise
+                except Exception:  # pragma: no cover - darf den Rest nicht kippen
+                    log.exception("Kursthemen konnten nicht gelesen werden")
+                    result.warnings.append("Kursthemen konnten nicht gelesen werden.")
+                if result.topics:
+                    result.sources["topics"] = "api/v3+html"
+
         return result
+
+    def fetch_course_topics(
+        self,
+        courses: list[dict],
+        max_courses: int = 12,
+        max_requests: int = 45,
+    ) -> list[dict]:
+        """Liest die Themen der Kurse - dort kuendigen Lehrkraefte oft an.
+
+        Zwei Formen kommen vor und werden beide beruecksichtigt:
+
+        * klassische Themen ("lesson"): Titel ueber das Kurs-Board, der Text
+          ueber die HTML-Seite ``/courses/<kurs>/topics/<thema>``
+        * Spalten-Boards ("column-board"): ``/api/v3/boards/<id>`` liefert die
+          Spalten mit Karten-Ids, ``/api/v3/cards?ids=…`` deren Inhalte
+
+        ``max_requests`` deckelt die Zahl der Abrufe, damit eine Aktualisierung
+        nicht minutenlang dauert.
+        """
+        budget = _Budget(max_requests)
+        topics: list[dict] = []
+
+        for course in courses[:max_courses]:
+            course_id = course.get("_id")
+            if not course_id or not budget.take():
+                continue
+            board = self._v3(f"course-rooms/{course_id}/board")
+            if not isinstance(board, dict):
+                continue
+
+            for element in _board_elements(board):
+                kind = (element.get("type") or "").lower()
+                content = element.get("content") if isinstance(element.get("content"), dict) else element
+                element_id = content.get("id") or content.get("_id")
+                if not element_id:
+                    continue
+
+                if "lesson" in kind or "topic" in kind:
+                    topics.append(
+                        self._read_lesson(course, element_id, content, budget)
+                    )
+                elif "board" in kind:
+                    topics.extend(self._read_column_board(course, element_id, budget))
+
+        return [t for t in topics if t]
+
+    def _read_lesson(
+        self, course: dict, lesson_id: str, content: dict, budget: "_Budget"
+    ) -> Optional[dict]:
+        """Klassisches Thema: Titel vom Board, Text aus der HTML-Seite."""
+        title = content.get("name") or content.get("title") or ""
+        text = ""
+        if budget.take():
+            soup = None
+            try:
+                soup = self._get_soup(f"/courses/{course['_id']}/topics/{lesson_id}")
+            except AuthError:
+                raise
+            except Exception:  # pragma: no cover - Netzwerkausfall
+                log.debug("Thema %s nicht lesbar", lesson_id, exc_info=True)
+            if soup is not None:
+                main = soup.select_one("main, .section-content, #topic-content, .container")
+                text = (main or soup).get_text(" ", strip=True)[:2000]
+
+        if not title and not text:
+            return None
+        return {
+            "id": lesson_id,
+            "title": title,
+            "text": text,
+            "course_id": course.get("_id"),
+            "course_name": course.get("name"),
+            "color": course.get("color"),
+            "url": f"{self.base_url}/courses/{course['_id']}/topics/{lesson_id}",
+        }
+
+    def _read_column_board(
+        self, course: dict, board_id: str, budget: "_Budget"
+    ) -> list[dict]:
+        """Spalten-Board: Karten einsammeln und deren Texte zusammenfassen."""
+        if not budget.take():
+            return []
+        board = self._v3(f"boards/{board_id}")
+        if not isinstance(board, dict):
+            return []
+
+        card_ids: list[str] = []
+        for column in board.get("columns") or []:
+            for card in (column or {}).get("cards") or []:
+                card_id = card.get("cardId") or card.get("id") if isinstance(card, dict) else card
+                if isinstance(card_id, str):
+                    card_ids.append(card_id)
+        if not card_ids or not budget.take():
+            return []
+
+        cards = self._v3("cards", {"ids": card_ids[:30]})
+        found = []
+        for card in _v3_list(cards):
+            text = _collect_text(card)
+            if not text:
+                continue
+            found.append(
+                {
+                    "id": card.get("id") or card.get("_id") or board_id,
+                    "title": card.get("title") or board.get("title") or "Kursthema",
+                    "text": text[:2000],
+                    "course_id": course.get("_id"),
+                    "course_name": course.get("name"),
+                    "color": course.get("color"),
+                    "url": f"{self.base_url}/courses/{course['_id']}",
+                }
+            )
+        return found
 
     def _fetch_calendar(self, days_ahead: int) -> list[dict]:
         """Kalendertermine; der Kalenderdienst haengt an mehreren Routen."""
@@ -476,6 +614,52 @@ def _extract_csrf(html: str) -> Optional[str]:
         return None
     value = field.get("value")
     return value or None
+
+
+class _Budget:
+    """Zaehlt Abrufe herunter, damit ein Kursdurchlauf begrenzt bleibt."""
+
+    def __init__(self, limit: int) -> None:
+        self.left = limit
+
+    def take(self) -> bool:
+        if self.left <= 0:
+            return False
+        self.left -= 1
+        return True
+
+
+def _board_elements(board: dict) -> list[dict]:
+    """Die Elementliste eines Kurs-Boards; die Feldnamen variieren."""
+    for key in ("elements", "roomElements", "boardElements", "data"):
+        value = board.get(key)
+        if isinstance(value, list):
+            return [e for e in value if isinstance(e, dict)]
+    return []
+
+
+TEXT_KEYS = ("text", "title", "name", "caption", "description", "content")
+
+
+def _collect_text(node: Any, depth: int = 0) -> str:
+    """Sammelt alle Textbausteine aus einer verschachtelten Kartenstruktur.
+
+    Die Board-API schachtelt Karteninhalte unterschiedlich tief; statt eine
+    feste Struktur anzunehmen, werden alle bekannten Textfelder eingesammelt.
+    """
+    if depth > 6:
+        return ""
+    if isinstance(node, str):
+        return node
+    parts: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key in TEXT_KEYS or isinstance(value, (dict, list)):
+                parts.append(_collect_text(value, depth + 1))
+    elif isinstance(node, list):
+        for value in node[:50]:
+            parts.append(_collect_text(value, depth + 1))
+    return " ".join(p for p in parts if p).strip()
 
 
 def _json_or_none(resp: requests.Response) -> Any:

@@ -83,6 +83,10 @@ function itemCard(item) {
   const kindBadge = item.kind === 'exam'
     ? '<span class="rounded-full bg-indigo-100 px-2 py-0.5 text-[11px] font-medium text-indigo-700">Test</span>'
     : '';
+  // Aus einem Kursthema gelesen - keine offizielle Aufgabe der Schul-Cloud.
+  const originBadge = item.origin === 'topic'
+    ? '<span class="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700">Kursthema</span>'
+    : '';
   const dot = item.color
     ? `<span class="inline-block h-2 w-2 shrink-0 rounded-full" style="background:${escapeHtml(item.color)}"></span>`
     : '';
@@ -108,6 +112,7 @@ function itemCard(item) {
         <div class="flex flex-wrap items-center gap-1.5">
           <h3 class="text-[15px] font-semibold leading-snug">${escapeHtml(item.title)}</h3>
           ${kindBadge}
+          ${originBadge}
           <span class="rounded-full px-2 py-0.5 text-[11px] font-medium ${status.cls}">${status.text}</span>
         </div>
         <p class="mt-1 flex items-center gap-1.5 text-xs text-slate-500">

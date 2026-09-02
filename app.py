@@ -33,6 +33,8 @@ API_URL = os.getenv("SC_API_URL") or None
 REFRESH_MINUTES = int(os.getenv("SC_REFRESH_MINUTES", "15") or 0)
 INGEST_TOKEN = os.getenv("SC_INGEST_TOKEN", "").strip()
 DEMO_MODE = os.getenv("SC_DEMO", "0") == "1"
+# Kursthemen mitlesen (Ankuendigungen ausserhalb des Aufgabenmoduls).
+SCAN_TOPICS = os.getenv("SC_SCAN_TOPICS", "1") == "1"
 # Optionaler Zugriffsschutz des Dashboards selbst - noetig, sobald der Server
 # nicht nur auf 127.0.0.1 lauscht (Handy im gleichen WLAN, eigener Server).
 DASHBOARD_PIN = os.getenv("SC_DASHBOARD_PIN", "").strip()
@@ -172,7 +174,7 @@ def sync(entry: dict[str, Any]) -> dict[str, Any]:
         source = "demo"
     else:
         client: SchulCloudClient = entry["client"]
-        fetch = client.fetch_all()
+        fetch = client.fetch_all(scan_topics=SCAN_TOPICS)
         source = client.strategy
 
     items = parser.build_items(fetch, BASE_URL, source=source)

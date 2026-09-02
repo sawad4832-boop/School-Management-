@@ -28,6 +28,23 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
+# Zwei Stufen von Stichwoertern fuer Ankuendigungen in Kursthemen:
+# STRONG genuegt allein, WEAK zaehlt nur zusammen mit einem Datum. Sonst
+# wuerde jedes Thema, in dem einmal "Seite" steht, in der Liste landen.
+STRONG_KEYWORDS = (
+    "klassenarbeit", "klausur", "leistungskontrolle", "lernkontrolle",
+    "vokabeltest", "pruefung", "prüfung", "diktat", "referat", "facharbeit",
+    "praesentation", "präsentation", "hausaufgabe", "hausaufgaben", "abgabe",
+    "abgeben", "abzugeben", "test schreiben", "arbeit schreiben",
+)
+WEAK_KEYWORDS = (
+    "bearbeiten", "lernen", "üben", "ueben", "wiederholen", "vorbereiten",
+    "mitbringen", "lesen", "aufgabe", "arbeitsblatt", "seite", "test",
+    "vortrag", "kolloquium", "hausarbeit", "schulaufgabe",
+)
+STRONG_RE = re.compile("|".join(re.escape(k) for k in STRONG_KEYWORDS), re.IGNORECASE)
+WEAK_RE = re.compile("|".join(re.escape(k) for k in WEAK_KEYWORDS), re.IGNORECASE)
+
 # Schluesselwoerter fuer Testankuendigungen / Leistungsnachweise.
 EXAM_KEYWORDS = (
     "klassenarbeit", "klausur", "leistungskontrolle", "lernkontrolle", "lek",
@@ -124,6 +141,15 @@ def is_exam(*texts: Any) -> bool:
     return any(EXAM_RE.search(strip_html(t, 2000)) for t in texts if t)
 
 
+def is_announcement(text: str, has_date: bool) -> bool:
+    """Steckt in einem Kursthema eine Aufgaben- oder Testankuendigung?"""
+    if not text:
+        return False
+    if STRONG_RE.search(text):
+        return True
+    return has_date and bool(WEAK_RE.search(text))
+
+
 # ----------------------------------------------------------------------
 # Normalisierung
 # ----------------------------------------------------------------------
@@ -163,7 +189,21 @@ def build_items(fetch, base_url: str, source: str = "api") -> list[dict]:
         if item:
             items.append(item)
 
+    # Kursthemen zuletzt: was schon als offizielle Aufgabe existiert, wird
+    # nicht doppelt aufgefuehrt.
+    known_titles = {_title_key(i["title"]) for i in items}
+    for topic in getattr(fetch, "topics", []) or []:
+        item = normalize_topic(topic, base_url, source)
+        if item and _title_key(item["title"]) not in known_titles:
+            items.append(item)
+            known_titles.add(_title_key(item["title"]))
+
     return dedupe(items)
+
+
+def _title_key(title: str) -> str:
+    """Vergleichsform eines Titels (fuer den Dublettenabgleich)."""
+    return re.sub(r"[^a-z0-9]+", "", (title or "").lower())
 
 
 def _index_submissions(submissions: Iterable[dict]) -> dict[str, dict]:
@@ -221,6 +261,46 @@ def normalize_task(task: dict, courses: dict[str, dict], base_url: str, source: 
         "description": description or (task.get("lessonName") or ""),
         "source": source,
     }
+
+
+def normalize_topic(topic: dict, base_url: str, source: str) -> Optional[dict]:
+    """Kursthema -> Eintrag, sofern darin etwas angekuendigt wird.
+
+    Lehrkraefte stellen Hausaufgaben und Tests oft nicht als offizielle Aufgabe
+    ein, sondern schreiben sie in ein Kursthema. Genau die sollen hier landen.
+    """
+    title = (topic.get("title") or "").strip()
+    body = strip_html(topic.get("text"), 2000)
+    haystack = f"{title} {body}".strip()
+    if not haystack:
+        return None
+
+    due = find_deadline_in_text(haystack)
+    if not is_announcement(haystack, due is not None):
+        return None
+
+    topic_id = topic.get("id") or _fallback_id(title, body[:80])
+    return {
+        "id": f"tp:{topic_id}",
+        "kind": "exam" if is_exam(haystack) else "homework",
+        "title": title or _first_sentence(body) or "Ankündigung im Kursthema",
+        "course": topic.get("course_name") or "Kursthema",
+        "course_id": topic.get("course_id"),
+        "color": topic.get("color"),
+        "due": due.isoformat() if due else None,
+        "status": "open",
+        "grade": None,
+        "origin": "topic",          # fuer die Kennzeichnung in der Oberflaeche
+        "url": topic.get("url") or urljoin(base_url + "/", "courses"),
+        "teacher": "",
+        "description": body[:400],
+        "source": source,
+    }
+
+
+def _first_sentence(text: str, limit: int = 80) -> str:
+    sentence = re.split(r"(?<=[.!?])\s", (text or "").strip(), maxsplit=1)[0]
+    return sentence[:limit].strip()
 
 
 def normalize_news(entry: dict, courses: dict[str, dict], base_url: str, source: str) -> Optional[dict]:

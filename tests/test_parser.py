@@ -111,3 +111,74 @@ def test_lan_report_and_qr():
 
     code = qr_lines("http://192.168.0.5:5000")
     assert code and all(len(line) == len(code[0]) for line in code)
+
+
+# ----------------------------------------------------------------------
+# Ankuendigungen in Kursthemen
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "text,has_date,expected",
+    [
+        ("Hausaufgabe: Fragen 1-3 beantworten", False, True),   # eindeutig
+        ("Am Freitag schreiben wir eine Klassenarbeit", False, True),
+        ("Bitte Seite 42 bearbeiten bis 12.09.2026", True, True),  # schwach + Datum
+        ("Bitte Seite 42 bearbeiten", False, False),               # schwach ohne Datum
+        ("Hier finden Sie die Folien der Stunde", False, False),   # reines Material
+        ("", False, False),
+    ],
+)
+def test_is_announcement(text, has_date, expected):
+    assert parser.is_announcement(text, has_date) is expected
+
+
+def test_normalize_topic_reads_homework_from_course_topic():
+    topic = {
+        "id": "l1",
+        "title": "Thema 7: Nationalsozialismus",
+        "text": "<p>Hausaufgabe: Quellentext lesen, bis zum 12.09.2026.</p>",
+        "course_name": "Geschichte 10b",
+        "course_id": "c4",
+        "url": "https://brandenburg.cloud/courses/c4/topics/l1",
+    }
+    item = parser.normalize_topic(topic, "https://brandenburg.cloud", "api")
+
+    assert item["id"] == "tp:l1"
+    assert item["kind"] == "homework"
+    assert item["origin"] == "topic"          # Kennzeichnung in der Oberflaeche
+    assert item["course"] == "Geschichte 10b"
+    assert item["due"].startswith("2026-09-12")
+    assert item["url"].endswith("/topics/l1")
+
+
+def test_normalize_topic_marks_tests_as_exam_and_skips_material():
+    exam = parser.normalize_topic(
+        {"id": "l2", "title": "Stoffwiederholung",
+         "text": "Der Vokabeltest findet am 20.09.2026 statt."},
+        "https://x", "api")
+    assert exam["kind"] == "exam"
+
+    material = parser.normalize_topic(
+        {"id": "l3", "title": "Linksammlung", "text": "Weiterführende Links zur Stunde."},
+        "https://x", "api")
+    assert material is None
+
+
+def test_topic_does_not_duplicate_an_official_task():
+    """Steht dieselbe Sache schon als Aufgabe, wird das Thema nicht doppelt gezeigt."""
+    fetch = type("F", (), {
+        "courses": [],
+        "tasks": [{"id": "t1", "name": "Lesetagebuch Kapitel 1-4", "courseName": "Deutsch",
+                   "dueDate": "2026-09-12T12:00:00Z", "status": {}}],
+        "topics": [
+            {"id": "l9", "title": "Lesetagebuch Kapitel 1-4",
+             "text": "Abgabe bis 12.09.2026", "course_name": "Deutsch"},
+            {"id": "l8", "title": "Vokabeltest Unit 4",
+             "text": "Test am 15.09.2026", "course_name": "Englisch"},
+        ],
+    })()
+    items = parser.build_items(fetch, "https://x")
+    ids = [i["id"] for i in items]
+
+    assert "hw:t1" in ids
+    assert "tp:l9" not in ids     # Dublette
+    assert "tp:l8" in ids         # eigenstaendige Ankuendigung

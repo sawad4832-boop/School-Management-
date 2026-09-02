@@ -190,3 +190,91 @@ def test_normalize_news_only_keeps_exams_with_date():
     assert parser.normalize_news(
         {"id": "n3", "title": "Klassenarbeit", "content": "<p>Termin folgt.</p>"},
         {}, "https://x", "api") is None
+
+
+# ----------------------------------------------------------------------
+# Kursthemen einsammeln (Board + klassische Themen)
+# ----------------------------------------------------------------------
+COURSE = {"_id": "c1", "name": "Geschichte 10b", "color": "#F44336"}
+
+BOARD = {
+    "elements": [
+        {"type": "lesson", "content": {"id": "l1", "name": "Thema 7: Weimarer Republik"}},
+        {"type": "column-board", "content": {"id": "b1", "title": "Kursboard"}},
+    ]
+}
+COLUMN_BOARD = {"id": "b1", "columns": [{"id": "col1", "cards": [{"cardId": "card1"}]}]}
+CARDS = {"data": [{
+    "id": "card1",
+    "title": "Ankündigung",
+    "elements": [{"type": "richText", "content": {"text": "<p>Klassenarbeit am 20.09.2026</p>"}}],
+}]}
+TOPIC_HTML = "<html><body><main>Hausaufgabe: Quellentext lesen bis 12.09.2026</main></body></html>"
+
+
+def test_fetch_course_topics_reads_lessons_and_boards():
+    client = make_client({
+        ("GET", "/course-rooms/c1/board"): FakeResponse(json_data=BOARD),
+        ("GET", "/api/v3/boards/b1"): FakeResponse(json_data=COLUMN_BOARD),
+        ("GET", "/api/v3/cards"): FakeResponse(json_data=CARDS),
+        ("GET", "/courses/c1/topics/l1"): FakeResponse(text=TOPIC_HTML, url="https://x/courses/c1/topics/l1"),
+    })
+    topics = client.fetch_course_topics([COURSE])
+    by_id = {t["id"]: t for t in topics}
+
+    assert "Hausaufgabe" in by_id["l1"]["text"]
+    assert by_id["l1"]["course_name"] == "Geschichte 10b"
+    assert by_id["l1"]["url"].endswith("/courses/c1/topics/l1")
+    assert "Klassenarbeit" in by_id["card1"]["text"]
+
+    items = {i["id"]: i for i in parser.build_items(
+        type("F", (), {"topics": topics})(), "https://brandenburg.cloud")}
+    assert items["tp:l1"]["kind"] == "homework"
+    assert items["tp:card1"]["kind"] == "exam"
+
+
+def test_fetch_course_topics_respects_request_budget():
+    """Viele Kurse duerfen die Aktualisierung nicht ins Endlose ziehen."""
+    client = make_client({("GET", "/board"): FakeResponse(json_data={"elements": []})})
+    courses = [{"_id": f"c{n}", "name": f"Kurs {n}"} for n in range(30)]
+
+    client.fetch_course_topics(courses, max_courses=12, max_requests=5)
+    assert len(client.session.calls) <= 5
+
+
+def test_fetch_all_survives_broken_topics():
+    """Ein Fehler beim Lesen der Themen darf die Aufgabenliste nicht kippen."""
+    client = make_client({
+        # Reihenfolge zaehlt: der laengere Pfad muss zuerst geprueft werden.
+        ("GET", "/api/v3/tasks/finished"): FakeResponse(json_data={"data": []}),
+        ("GET", "/api/v3/tasks"): FakeResponse(json_data={"data": [
+            {"id": "t1", "name": "Arbeitsblatt", "courseName": "Mathe", "status": {}}]}),
+        ("GET", "/api/v3/courses"): FakeResponse(json_data={"data": [{"id": "c1", "name": "Mathe"}]}),
+    })
+    result = client.fetch_all()          # Board-Abrufe laufen ins Leere (404)
+
+    assert [t["id"] for t in result.tasks] == ["t1"]
+    assert result.topics == []
+
+
+def test_topics_are_cached_between_refreshes():
+    """Der zweite Abruf kurz danach darf die Kurse nicht erneut durchgehen."""
+    client = make_client({
+        ("GET", "/api/v3/courses"): FakeResponse(json_data={"data": [{"id": "c1", "name": "Mathe"}]}),
+        ("GET", "/course-rooms/c1/board"): FakeResponse(json_data=BOARD),
+        ("GET", "/api/v3/boards/b1"): FakeResponse(json_data=COLUMN_BOARD),
+        ("GET", "/api/v3/cards"): FakeResponse(json_data=CARDS),
+        ("GET", "/courses/c1/topics/l1"): FakeResponse(text=TOPIC_HTML, url="https://x/t"),
+    })
+    first = client.fetch_all()
+    assert first.sources["topics"] == "api/v3+html"
+    calls_after_first = len(client.session.calls)
+
+    second = client.fetch_all()
+    assert second.sources["topics"] == "zwischenspeicher"
+    assert [t["id"] for t in second.topics] == [t["id"] for t in first.topics]
+
+    # Nach Ablauf der Frist wird wieder frisch gelesen
+    third = client.fetch_all(topics_ttl=0)
+    assert third.sources["topics"] == "api/v3+html"
+    assert len(client.session.calls) > calls_after_first

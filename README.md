@@ -167,6 +167,7 @@ Ausgabe im Erfolgsfall:
 | `SC_DB_PATH` | Pfad der SQLite-Datei | `data/dashboard.sqlite3` |
 | `SC_DASHBOARD_PIN` | PIN-Schutz des Dashboards (Pflicht bei `HOST=0.0.0.0`) | leer |
 | `SC_PERSIST_SESSION` | Anmeldung übersteht Neustarts (Token verschlüsselt im Cookie) | `0` |
+| `SC_SCAN_TOPICS` | Kursthemen nach Ankündigungen durchsuchen | `1` |
 | `SC_DEMO` | Demo-Modus | `0` |
 | `PORT` / `HOST` | Bindung des Servers | `5000` / `127.0.0.1` |
 
@@ -174,7 +175,7 @@ Ausgabe im Erfolgsfall:
 
 ```bash
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q     # 41 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
+.venv/bin/python -m pytest -q     # 55 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
 ```
 
 Dazu kommt ein Browsertest (`tests/test_e2e_restart.py`), der prüft, dass ein Haken
@@ -200,6 +201,9 @@ Es gibt **keine offizielle öffentliche API**. Die folgenden Endpunkte wurden ge
 | `GET /api/v3/tasks/finished` | abgeschlossene und bewertete Aufgaben |
 | `GET /api/v3/courses` | Kursübersicht inkl. Farbe |
 | `GET /api/v3/news` | Ankündigungen (Quelle für Testtermine) |
+| `GET /api/v3/course-rooms/<kurs>/board` | Themenübersicht eines Kurses |
+| `GET /api/v3/boards/<id>` + `/api/v3/cards?ids=…` | Spalten-Boards mit Karten |
+| `GET /courses/<kurs>/topics/<thema>` | Text eines klassischen Kursthemas (HTML) |
 | `POST /login` | Formular-Login – benötigt das `_csrf`-Feld der Login-Seite |
 
 Die älteren Feathers-Services (`/api/v1/homework`, `/submissions`, `/lessons`) sind auf
@@ -288,6 +292,23 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
   Klassenarbeit, Klausur, Lernkontrolle, Vokabeltest, Prüfung, Diktat, Referat,
   Präsentation … Treffer erscheinen als Typ **„Test / Arbeit"**; gewöhnliche
   Stundenplan- und Schultermine werden bewusst ignoriert.
+* **Kursthemen** – Lehrkräfte stellen Hausaufgaben und Tests oft nicht als
+  offizielle Aufgabe ein, sondern schreiben sie in ein Kursthema. Beide dort
+  vorkommenden Formen werden gelesen: klassische Themen (Titel über
+  `/api/v3/course-rooms/<kurs>/board`, Text über die Seite
+  `/courses/<kurs>/topics/<thema>`) und Spalten-Boards (`/api/v3/boards/<id>`
+  plus `/api/v3/cards?ids=…`). Solche Einträge tragen in der Liste das Kennzeichen
+  **„Kursthema"**.
+
+  Damit nicht jedes Thema in der Liste landet, gilt eine zweistufige Regel:
+  eindeutige Wörter (Hausaufgabe, Abgabe, Klassenarbeit, Test …) genügen allein,
+  schwache (bearbeiten, lernen, Seite, mitbringen …) nur zusammen mit einem
+  gefundenen Datum. Reine Materialsammlungen bleiben so draußen. Steht dieselbe
+  Sache schon als offizielle Aufgabe, wird das Thema nicht doppelt gezeigt.
+
+  Der Durchlauf kostet zusätzliche Abrufe und ist deshalb gedeckelt (höchstens
+  12 Kurse und 45 Abrufe) sowie 30 Minuten zwischengespeichert. Abschalten mit
+  `SC_SCAN_TOPICS=0`.
 
 ## 7. Übersicht & Interaktivität
 
@@ -344,7 +365,7 @@ static/icons/             App-Symbole fuer den Homebildschirm
 Dockerfile                fuer den Dauerbetrieb auf einem eigenen Server
 render.yaml               Bauplan fuer die Einrichtung bei Render (vom Handy aus)
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite (41 Tests + Browsertest)
+tests/                    pytest-Suite (55 Tests inkl. Browsertest)
 ```
 
 ### Ohne CDN betreiben

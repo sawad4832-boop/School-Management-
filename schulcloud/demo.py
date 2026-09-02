@@ -163,11 +163,45 @@ def demo_fetch() -> FetchResult:
             "content": "<p>Bitte Verpflegung mitbringen.</p>",
         },
     ]
+    topics = [
+        {
+            "id": "tp1",
+            "title": "Thema 7: Nationalsozialismus",
+            "text": "Hausaufgabe: Quellentext S. 112 lesen und die Fragen 1–3 schriftlich "
+                    "beantworten, bis zum "
+                    + (datetime.now(BERLIN) + timedelta(days=2)).strftime("%d.%m.%Y") + ".",
+            "course_id": "c4",
+            "course_name": "Geschichte 10b",
+            "color": "#F44336",
+            "url": "https://brandenburg.cloud/courses/c4/topics/tp1",
+        },
+        {
+            "id": "tp2",
+            "title": "Organische Chemie – Überblick",
+            "text": "Der nächste Test wird am "
+                    + (datetime.now(BERLIN) + timedelta(days=6)).strftime("%d.%m.%Y")
+                    + " geschrieben. Inhalt: Alkane und Alkene.",
+            "course_id": "c3",
+            "course_name": "Biologie 10b",
+            "color": "#4CAF50",
+            "url": "https://brandenburg.cloud/courses/c3/topics/tp2",
+        },
+        {
+            "id": "tp3",
+            "title": "Materialsammlung",
+            "text": "Hier finden Sie die Folien der letzten Stunde sowie weiterführende Links.",
+            "course_id": "c1",
+            "course_name": "Mathematik 10b",
+            "url": "https://brandenburg.cloud/courses/c1/topics/tp3",
+        },
+    ]
     return FetchResult(
         courses=courses,
         tasks=tasks,
+        topics=topics,
         events=events,
         lessons=lessons,
         news=news,
-        sources={"courses": "demo", "tasks": "demo", "calendar": "demo", "news": "demo"},
+        sources={"courses": "demo", "tasks": "demo", "calendar": "demo",
+                 "news": "demo", "topics": "demo"},
     )
