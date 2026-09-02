@@ -82,7 +82,10 @@ DEADLINE_RE = re.compile(
     re.IGNORECASE,
 )
 
-BERLIN = timezone(timedelta(hours=2))  # Fallback, wenn keine Zone geliefert wird
+BERLIN = timezone(timedelta(hours=2))
+
+TOPIC_WINDOW_DAYS = 14      # so weit nach vorn wird geschaut
+TOPIC_GRACE_HOURS = 24      # so lange bleibt ein eben verstrichener Termin  # Fallback, wenn keine Zone geliefert wird
 
 
 # ----------------------------------------------------------------------
@@ -175,7 +178,9 @@ def is_announcement(text: str) -> bool:
 # ----------------------------------------------------------------------
 # Normalisierung
 # ----------------------------------------------------------------------
-def build_items(fetch, base_url: str, source: str = "api") -> list[dict]:
+def build_items(
+    fetch, base_url: str, source: str = "api", topic_window_days: int = TOPIC_WINDOW_DAYS
+) -> list[dict]:
     """Erzeugt aus einem :class:`FetchResult` die Dashboard-Eintraege."""
     courses = {}
     for course in getattr(fetch, "courses", []) or []:
@@ -215,7 +220,7 @@ def build_items(fetch, base_url: str, source: str = "api") -> list[dict]:
     # nicht doppelt aufgefuehrt.
     known_titles = {_title_key(i["title"]) for i in items}
     for topic in getattr(fetch, "topics", []) or []:
-        item = normalize_topic(topic, base_url, source)
+        item = normalize_topic(topic, base_url, source, window_days=topic_window_days)
         if item and _title_key(item["title"]) not in known_titles:
             items.append(item)
             known_titles.add(_title_key(item["title"]))
@@ -285,7 +290,44 @@ def normalize_task(task: dict, courses: dict[str, dict], base_url: str, source: 
     }
 
 
-def normalize_topic(topic: dict, base_url: str, source: str) -> Optional[dict]:
+def is_current_topic(
+    topic: dict,
+    due: Optional[datetime],
+    now: Optional[datetime] = None,
+    window_days: int = TOPIC_WINDOW_DAYS,
+) -> bool:
+    """Ist ein Kursthema zeitlich noch relevant?
+
+    Kursthemen und Board-Karten bleiben jahrelang stehen. Ohne diese Pruefung
+    stuende der Stoff vergangener Monate dauerhaft in der Liste. Es zaehlt:
+
+    1. ein gefundener Termin - er muss im Fenster liegen (nicht laenger als
+       ``TOPIC_GRACE_HOURS`` vorbei, hoechstens ``window_days`` voraus)
+    2. sonst der Zeitstempel der Karte - sie muss aus den letzten
+       ``window_days`` stammen
+    3. sonst die Position im Board - nur die drei letzten Eintraege gelten
+       noch als aktuell
+    """
+    now = now or datetime.now(timezone.utc)
+    if due is not None:
+        return (
+            now - timedelta(hours=TOPIC_GRACE_HOURS) <= due <= now + timedelta(days=window_days)
+        )
+
+    updated = parse_datetime(topic.get("updated_at"))
+    if updated is not None:
+        return updated >= now - timedelta(days=window_days)
+
+    return (topic.get("recent_rank") if topic.get("recent_rank") is not None else 99) < 3
+
+
+def normalize_topic(
+    topic: dict,
+    base_url: str,
+    source: str,
+    now: Optional[datetime] = None,
+    window_days: int = TOPIC_WINDOW_DAYS,
+) -> Optional[dict]:
     """Kursthema -> Eintrag, sofern darin etwas angekuendigt wird.
 
     Lehrkraefte stellen Hausaufgaben und Tests oft nicht als offizielle Aufgabe
@@ -299,7 +341,10 @@ def normalize_topic(topic: dict, base_url: str, source: str) -> Optional[dict]:
 
     if not is_announcement(haystack):
         return None
+
     due = find_deadline_in_text(haystack)
+    if not is_current_topic(topic, due, now, window_days):
+        return None
 
     topic_id = topic.get("id") or _fallback_id(title, body[:80])
     return {

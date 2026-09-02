@@ -35,6 +35,8 @@ INGEST_TOKEN = os.getenv("SC_INGEST_TOKEN", "").strip()
 DEMO_MODE = os.getenv("SC_DEMO", "0") == "1"
 # Kursthemen mitlesen (Ankuendigungen ausserhalb des Aufgabenmoduls).
 SCAN_TOPICS = os.getenv("SC_SCAN_TOPICS", "1") == "1"
+# Wie weit ein Kursthema zeitlich reichen darf, um noch angezeigt zu werden.
+TOPIC_WINDOW_DAYS = int(os.getenv("SC_TOPIC_WINDOW_DAYS", "14"))
 # Optionaler Zugriffsschutz des Dashboards selbst - noetig, sobald der Server
 # nicht nur auf 127.0.0.1 lauscht (Handy im gleichen WLAN, eigener Server).
 DASHBOARD_PIN = os.getenv("SC_DASHBOARD_PIN", "").strip()
@@ -177,7 +179,9 @@ def sync(entry: dict[str, Any]) -> dict[str, Any]:
         fetch = client.fetch_all(scan_topics=SCAN_TOPICS)
         source = client.strategy
 
-    items = parser.build_items(fetch, BASE_URL, source=source)
+    items = parser.build_items(
+        fetch, BASE_URL, source=source, topic_window_days=TOPIC_WINDOW_DAYS
+    )
     ingested = entry.get("ingested") or []
     if ingested:
         items = parser.dedupe(items + ingested)

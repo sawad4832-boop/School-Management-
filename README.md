@@ -168,6 +168,7 @@ Ausgabe im Erfolgsfall:
 | `SC_DASHBOARD_PIN` | PIN-Schutz des Dashboards (Pflicht bei `HOST=0.0.0.0`) | leer |
 | `SC_PERSIST_SESSION` | Anmeldung übersteht Neustarts (Token verschlüsselt im Cookie) | `0` |
 | `SC_SCAN_TOPICS` | Kursthemen nach Ankündigungen durchsuchen | `1` |
+| `SC_TOPIC_WINDOW_DAYS` | wie weit ein Kursthema zeitlich reichen darf | `14` |
 | `SC_DEMO` | Demo-Modus | `0` |
 | `PORT` / `HOST` | Bindung des Servers | `5000` / `127.0.0.1` |
 
@@ -175,7 +176,7 @@ Ausgabe im Erfolgsfall:
 
 ```bash
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q     # 76 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
+.venv/bin/python -m pytest -q     # 81 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
 ```
 
 Dazu kommt ein Browsertest (`tests/test_e2e_restart.py`), der prüft, dass ein Haken
@@ -310,6 +311,18 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
   `Test` nicht auf „Protest". Steht dieselbe Sache schon als offizielle Aufgabe,
   wird das Thema nicht doppelt gezeigt.
 
+  **Zeitfenster:** Kursthemen und Board-Karten bleiben jahrelang stehen, deshalb
+  zählt zusätzlich, ob der Eintrag noch aktuell ist. Geprüft wird in dieser
+  Reihenfolge:
+
+  1. der im Text gefundene **Termin** – er muss im Fenster liegen (höchstens
+     24 Stunden vorbei, höchstens 14 Tage voraus),
+  2. sonst der **Zeitstempel** der Karte – sie muss aus den letzten 14 Tagen sein,
+  3. sonst die **Position** im Board – nur die drei letzten Einträge gelten noch.
+
+  Alles andere wird verworfen und erscheint auch nicht im Archiv. Die Fensterbreite
+  lässt sich über `SC_TOPIC_WINDOW_DAYS` ändern.
+
   Der Durchlauf kostet zusätzliche Abrufe und ist deshalb gedeckelt (höchstens
   12 Kurse und 45 Abrufe) sowie 30 Minuten zwischengespeichert. Abschalten mit
   `SC_SCAN_TOPICS=0`.
@@ -373,7 +386,7 @@ static/icons/             App-Symbole fuer den Homebildschirm
 Dockerfile                fuer den Dauerbetrieb auf einem eigenen Server
 render.yaml               Bauplan fuer die Einrichtung bei Render (vom Handy aus)
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite (76 Tests inkl. Browsertests)
+tests/                    pytest-Suite (81 Tests inkl. Browsertests)
 ```
 
 ### Ohne CDN betreiben

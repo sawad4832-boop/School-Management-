@@ -194,6 +194,19 @@ def demo_fetch() -> FetchResult:
             "course_name": "Mathematik 10b",
             "url": "https://brandenburg.cloud/courses/c1/topics/tp3",
         },
+        {
+            # Alte Board-Karte: eindeutige Ankuendigung, aber laengst vorbei -
+            # sie darf nicht mehr auftauchen.
+            "id": "tp4",
+            "title": "Thema 2: Mittelalter",
+            "text": "Hausaufgabe: Zeitleiste anlegen, Abgabe bis "
+                    + (datetime.now(BERLIN) - timedelta(days=40)).strftime("%d.%m.%Y") + ".",
+            "course_id": "c4",
+            "course_name": "Geschichte 10b",
+            "updated_at": (datetime.now(BERLIN) - timedelta(days=40)).isoformat(),
+            "recent_rank": 8,
+            "url": "https://brandenburg.cloud/courses/c4/topics/tp4",
+        },
     ]
     return FetchResult(
         courses=courses,

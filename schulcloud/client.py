@@ -435,16 +435,21 @@ class SchulCloudClient:
             if not isinstance(board, dict):
                 continue
 
-            for element in _board_elements(board):
+            elements = _board_elements(board)
+            for position, element in enumerate(elements):
                 kind = (element.get("type") or "").lower()
                 content = element.get("content") if isinstance(element.get("content"), dict) else element
                 element_id = content.get("id") or content.get("_id")
                 if not element_id:
                     continue
 
+                # Abstand zum Ende der Liste: 0 ist der neueste Eintrag. Dient
+                # als Notbehelf, wenn weder Datum noch Zeitstempel vorliegen.
+                rank = len(elements) - 1 - position
+
                 if "lesson" in kind or "topic" in kind:
                     topics.append(
-                        self._read_lesson(course, element_id, content, budget)
+                        self._read_lesson(course, element_id, content, budget, rank)
                     )
                 elif "board" in kind:
                     topics.extend(self._read_column_board(course, element_id, budget))
@@ -452,7 +457,7 @@ class SchulCloudClient:
         return [t for t in topics if t]
 
     def _read_lesson(
-        self, course: dict, lesson_id: str, content: dict, budget: "_Budget"
+        self, course: dict, lesson_id: str, content: dict, budget: "_Budget", rank: int = 0
     ) -> Optional[dict]:
         """Klassisches Thema: Titel vom Board, Text aus der HTML-Seite."""
         title = content.get("name") or content.get("title") or ""
@@ -478,6 +483,8 @@ class SchulCloudClient:
             "course_id": course.get("_id"),
             "course_name": course.get("name"),
             "color": course.get("color"),
+            "updated_at": content.get("updatedAt") or content.get("createdAt"),
+            "recent_rank": rank,
             "url": f"{self.base_url}/courses/{course['_id']}/topics/{lesson_id}",
         }
 
@@ -501,8 +508,9 @@ class SchulCloudClient:
             return []
 
         cards = self._v3("cards", {"ids": card_ids[:30]})
+        entries = _v3_list(cards)
         found = []
-        for card in _v3_list(cards):
+        for position, card in enumerate(entries):
             text = _collect_text(card)
             if not text:
                 continue
@@ -514,6 +522,8 @@ class SchulCloudClient:
                     "course_id": course.get("_id"),
                     "course_name": course.get("name"),
                     "color": course.get("color"),
+                    "updated_at": card.get("updatedAt") or card.get("createdAt"),
+                    "recent_rank": len(entries) - 1 - position,
                     "url": f"{self.base_url}/courses/{course['_id']}",
                 }
             )

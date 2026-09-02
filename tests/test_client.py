@@ -6,6 +6,8 @@ ein Fake-Objekt ersetzt, das vorbereitete Antworten liefert.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from schulcloud import parser
@@ -204,12 +206,15 @@ BOARD = {
     ]
 }
 COLUMN_BOARD = {"id": "b1", "columns": [{"id": "col1", "cards": [{"cardId": "card1"}]}]}
+_BALD = (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%d.%m.%Y")
 CARDS = {"data": [{
     "id": "card1",
     "title": "Ankündigung",
-    "elements": [{"type": "richText", "content": {"text": "<p>Klassenarbeit am 20.09.2026</p>"}}],
+    "elements": [{"type": "richText",
+                  "content": {"text": f"<p>Klassenarbeit am {_BALD}</p>"}}],
 }]}
-TOPIC_HTML = "<html><body><main>Hausaufgabe: Quellentext lesen bis 12.09.2026</main></body></html>"
+TOPIC_HTML = ("<html><body><main>Hausaufgabe: Quellentext lesen bis "
+              f"{_BALD}</main></body></html>")
 
 
 def test_fetch_course_topics_reads_lessons_and_boards():

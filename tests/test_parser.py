@@ -142,10 +142,11 @@ def test_is_announcement_only_matches_homework_and_tests(text, expected):
 
 
 def test_normalize_topic_reads_homework_from_course_topic():
+    termin = datetime.now(parser.BERLIN) + timedelta(days=6)
     topic = {
         "id": "l1",
         "title": "Thema 7: Nationalsozialismus",
-        "text": "<p>Hausaufgabe: Quellentext lesen, bis zum 12.09.2026.</p>",
+        "text": f"<p>Hausaufgabe: Quellentext lesen, bis zum {termin:%d.%m.%Y}.</p>",
         "course_name": "Geschichte 10b",
         "course_id": "c4",
         "url": "https://brandenburg.cloud/courses/c4/topics/l1",
@@ -156,14 +157,15 @@ def test_normalize_topic_reads_homework_from_course_topic():
     assert item["kind"] == "homework"
     assert item["origin"] == "topic"          # Kennzeichnung in der Oberflaeche
     assert item["course"] == "Geschichte 10b"
-    assert item["due"].startswith("2026-09-12")
+    assert item["due"].startswith(termin.strftime("%Y-%m-%d"))
     assert item["url"].endswith("/topics/l1")
 
 
 def test_normalize_topic_marks_tests_as_exam_and_skips_material():
+    in_fuenf_tagen = (datetime.now(parser.BERLIN) + timedelta(days=5)).strftime("%d.%m.%Y")
     exam = parser.normalize_topic(
         {"id": "l2", "title": "Stoffwiederholung",
-         "text": "Der Vokabeltest findet am 20.09.2026 statt."},
+         "text": f"Der Vokabeltest findet am {in_fuenf_tagen} statt."},
         "https://x", "api")
     assert exam["kind"] == "exam"
 
@@ -175,15 +177,16 @@ def test_normalize_topic_marks_tests_as_exam_and_skips_material():
 
 def test_topic_does_not_duplicate_an_official_task():
     """Steht dieselbe Sache schon als Aufgabe, wird das Thema nicht doppelt gezeigt."""
+    bald = datetime.now(parser.BERLIN) + timedelta(days=4)
     fetch = type("F", (), {
         "courses": [],
         "tasks": [{"id": "t1", "name": "Lesetagebuch Kapitel 1-4", "courseName": "Deutsch",
                    "dueDate": "2026-09-12T12:00:00Z", "status": {}}],
         "topics": [
             {"id": "l9", "title": "Lesetagebuch Kapitel 1-4",
-             "text": "Hausaufgabe bis 12.09.2026", "course_name": "Deutsch"},
+             "text": f"Hausaufgabe bis {bald:%d.%m.%Y}", "course_name": "Deutsch"},
             {"id": "l8", "title": "Vokabeltest Unit 4",
-             "text": "Test am 15.09.2026", "course_name": "Englisch"},
+             "text": f"Test am {bald:%d.%m.%Y}", "course_name": "Englisch"},
         ],
     })()
     items = parser.build_items(fetch, "https://x")
@@ -211,3 +214,52 @@ def test_topic_does_not_duplicate_an_official_task():
 )
 def test_is_exam_respects_word_boundaries(text, expected):
     assert parser.is_exam(text) is expected
+
+
+# ----------------------------------------------------------------------
+# Zeitfenster: nur aktuelle Kursthemen, nichts Altes
+# ----------------------------------------------------------------------
+def _topic(text, **extra):
+    return {"id": "x", "title": "Thema", "text": text, **extra}
+
+
+def test_topic_window_keeps_only_the_next_two_weeks():
+    jetzt = datetime.now(timezone.utc)
+
+    def mit_datum(tage):
+        datum = (jetzt + timedelta(days=tage)).strftime("%d.%m.%Y")
+        return parser.normalize_topic(_topic(f"Hausaufgabe bis {datum}"), "https://x", "api")
+
+    assert mit_datum(1) is not None       # morgen
+    assert mit_datum(13) is not None      # noch im Fenster
+    assert mit_datum(20) is None          # zu weit voraus
+    assert mit_datum(-10) is None         # alter Stoff
+    assert mit_datum(0) is not None       # heute faellig
+
+
+def test_topic_without_date_falls_back_to_the_card_timestamp():
+    jetzt = datetime.now(timezone.utc)
+    frisch = _topic("Hausaufgabe: Text lesen",
+                    updated_at=(jetzt - timedelta(days=3)).isoformat())
+    alt = _topic("Hausaufgabe: Text lesen",
+                 updated_at=(jetzt - timedelta(days=90)).isoformat())
+
+    assert parser.normalize_topic(frisch, "https://x", "api") is not None
+    assert parser.normalize_topic(alt, "https://x", "api") is None
+
+
+def test_topic_without_date_and_timestamp_uses_position_in_board():
+    """Ohne jede Zeitangabe zaehlen nur die letzten Eintraege des Boards."""
+    neu = _topic("Hausaufgabe: Text lesen", recent_rank=0)
+    alt = _topic("Hausaufgabe: Text lesen", recent_rank=12)
+
+    assert parser.normalize_topic(neu, "https://x", "api") is not None
+    assert parser.normalize_topic(alt, "https://x", "api") is None
+
+
+def test_topic_window_is_configurable():
+    datum = (datetime.now(timezone.utc) + timedelta(days=20)).strftime("%d.%m.%Y")
+    topic = _topic(f"Klassenarbeit am {datum}")
+
+    assert parser.normalize_topic(topic, "https://x", "api") is None
+    assert parser.normalize_topic(topic, "https://x", "api", window_days=30) is not None

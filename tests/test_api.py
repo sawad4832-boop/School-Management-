@@ -290,3 +290,13 @@ def test_graded_task_is_not_counted_as_expired(client):
     graded = next(i for i in data["archive"] if i["status"] == "graded")
     assert graded["expired"] is False
     assert data["stats"]["overdue"] == 1        # nur das offene Arbeitsblatt
+
+
+def test_old_board_cards_do_not_appear(client):
+    """Die alte Board-Karte der Demo taucht weder offen noch im Archiv auf."""
+    login_demo(client)
+    data = client.get("/api/items").get_json()
+
+    titles = {i["title"] for i in data["active"]} | {i["title"] for i in data["archive"]}
+    assert "Thema 2: Mittelalter" not in titles
+    assert "Thema 7: Nationalsozialismus" in titles      # die aktuelle bleibt
