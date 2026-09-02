@@ -35,7 +35,9 @@ def test_login_and_items(client):
     data = client.get("/api/items").get_json()
     assert data["logged_in"] is True
     assert data["stats"]["open"] >= 5
-    assert data["active"][0]["urgency"]["level"] == "overdue"
+    # Dringendstes zuerst - Abgelaufenes steht gar nicht mehr in der Liste
+    assert data["active"][0]["urgency"]["level"] == "critical"
+    assert all(i["urgency"]["level"] != "overdue" for i in data["active"])
     # Bewertete Aufgabe liegt sofort im Archiv
     assert any(i["status"] == "graded" for i in data["archive"])
 
@@ -263,3 +265,28 @@ def test_asset_version_changes_with_the_interface(client):
         assert app_module.asset_version() != version
     finally:
         os.utime(script, (original, original))
+
+
+def test_overdue_items_move_to_the_archive(client):
+    """Abgelaufene Aufgaben belasten die To-do-Liste nicht mehr."""
+    login_demo(client)
+    data = client.get("/api/items").get_json()
+
+    assert all(not i.get("expired") for i in data["active"])
+    expired = [i for i in data["archive"] if i.get("expired")]
+    assert expired, "die Demo enthaelt eine ueberfaellige Aufgabe"
+    assert data["stats"]["overdue"] == len([i for i in expired if not i["done"]])
+
+    # Sie sind nur verschoben, nicht verschwunden
+    titles = {i["title"] for i in data["archive"]}
+    assert "Arbeitsblatt 4: Quadratische Funktionen" in titles
+
+
+def test_graded_task_is_not_counted_as_expired(client):
+    """Eine bewertete Aufgabe mit altem Termin ist erledigt, nicht abgelaufen."""
+    login_demo(client)
+    data = client.get("/api/items").get_json()
+
+    graded = next(i for i in data["archive"] if i["status"] == "graded")
+    assert graded["expired"] is False
+    assert data["stats"]["overdue"] == 1        # nur das offene Arbeitsblatt

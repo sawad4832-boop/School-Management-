@@ -175,7 +175,7 @@ Ausgabe im Erfolgsfall:
 
 ```bash
 .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q     # 55 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
+.venv/bin/python -m pytest -q     # 76 Tests: Client, Parsing, Store, HTTP-API, PWA, Hosting
 ```
 
 Dazu kommt ein Browsertest (`tests/test_e2e_restart.py`), der prüft, dass ein Haken
@@ -300,11 +300,15 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
   plus `/api/v3/cards?ids=…`). Solche Einträge tragen in der Liste das Kennzeichen
   **„Kursthema"**.
 
-  Damit nicht jedes Thema in der Liste landet, gilt eine zweistufige Regel:
-  eindeutige Wörter (Hausaufgabe, Abgabe, Klassenarbeit, Test …) genügen allein,
-  schwache (bearbeiten, lernen, Seite, mitbringen …) nur zusammen mit einem
-  gefundenen Datum. Reine Materialsammlungen bleiben so draußen. Steht dieselbe
-  Sache schon als offizielle Aufgabe, wird das Thema nicht doppelt gezeigt.
+  Aufgenommen wird ein Thema nur, wenn dort **ausdrücklich** eine Hausaufgabe
+  oder ein Test steht: `Hausaufgabe`, `HA:`, `Test` (auch `Vokabeltest`,
+  `Kurztest`), `Klassenarbeit`, `Klausur`, `Lernkontrolle`, `Leistungskontrolle`,
+  `Prüfung`, `Diktat` sowie „Arbeit schreiben" / „schreiben wir eine Arbeit".
+  Unterrichtsstoff bleibt bewusst draußen – Wörter wie *Aufgabe*, *bearbeiten*,
+  *Seite* oder *lernen* lösen **nichts** aus, auch nicht zusammen mit einem
+  Datum. Wortgrenzen werden beachtet: `HA` trifft nicht auf „haben" zu und
+  `Test` nicht auf „Protest". Steht dieselbe Sache schon als offizielle Aufgabe,
+  wird das Thema nicht doppelt gezeigt.
 
   Der Durchlauf kostet zusätzliche Abrufe und ist deshalb gedeckelt (höchstens
   12 Kurse und 45 Abrufe) sowie 30 Minuten zwischengespeichert. Abschalten mit
@@ -312,9 +316,13 @@ ein Apple-Entwicklerkonto und Xcode – deshalb ist die Erweiterung für Chrome/
 
 ## 7. Übersicht & Interaktivität
 
-* **Sortierung nach Dringlichkeit:** überfällig → < 24 h → < 48 h → diese Woche → später →
+* **Sortierung nach Dringlichkeit:** < 24 h → < 48 h → diese Woche → später →
   ohne Termin, innerhalb einer Stufe nach Abgabezeitpunkt.
-* **Farbliche Warnungen:** roter Balken bei überfällig und < 24 h, orange bei < 48 h,
+* **Abgelaufenes verschwindet:** Ist der Termin vorbei und nichts abgehakt oder
+  abgegeben, wandert der Eintrag ins Archiv (Kennzeichen „abgelaufen") und
+  belastet die To-do-Liste nicht mehr. Verloren geht dabei nichts – die Kennzahl
+  „Abgelaufen" zählt sie weiter.
+* **Farbliche Warnungen:** roter Balken bei < 24 h, orange bei < 48 h,
   gelb innerhalb einer Woche, grau danach. Dazu ein Countdown („in 13 Std. 59 Min.").
 * **Abhaken:** Klick auf die Checkbox → Eintrag wandert ins Archiv, dort per
   „Zurückholen" reversibel. Die Schul-Cloud erlaubt kein Setzen von außen, der
@@ -365,7 +373,7 @@ static/icons/             App-Symbole fuer den Homebildschirm
 Dockerfile                fuer den Dauerbetrieb auf einem eigenen Server
 render.yaml               Bauplan fuer die Einrichtung bei Render (vom Handy aus)
 browser-extension/        Chrome-/Edge-Erweiterung (MV3) als Alternative zum Login
-tests/                    pytest-Suite (55 Tests inkl. Browsertest)
+tests/                    pytest-Suite (76 Tests inkl. Browsertests)
 ```
 
 ### Ohne CDN betreiben

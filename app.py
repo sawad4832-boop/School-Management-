@@ -213,7 +213,17 @@ def view_items(entry: dict[str, Any]) -> dict[str, Any]:
         item["note"] = state.get("note", "")
         # Was in der Schul-Cloud abgegeben, bewertet oder abgeschlossen ist,
         # gilt als erledigt - genau wie ein selbst gesetzter Haken.
-        if item["done"] or item["status"] in ("submitted", "graded") or item.get("finished"):
+        erledigt = (
+            item["done"]
+            or item["status"] in ("submitted", "graded")
+            or item.get("finished")
+        )
+        # Abgelaufen: der Termin ist vorbei und nichts davon trifft zu. Solche
+        # Eintraege sollen die To-do-Liste nicht mehr belasten, verschwinden
+        # aber nicht spurlos, sondern liegen im Archiv.
+        item["expired"] = not erledigt and item["urgency"]["level"] == "overdue"
+
+        if erledigt or item["expired"]:
             archive.append(item)
         else:
             active.append(item)
@@ -233,11 +243,12 @@ def _stats(active: list[dict], archive: list[dict]) -> dict[str, int]:
     levels = [i["urgency"]["level"] for i in active]
     return {
         "open": len(active),
-        "overdue": levels.count("overdue"),
+        # Abgelaufene liegen im Archiv, werden aber weiter gezaehlt.
+        "overdue": sum(1 for i in archive if i.get("expired") and not i.get("done")),
         "next24h": levels.count("critical"),
         "next48h": levels.count("critical") + levels.count("warning"),
         "exams": sum(1 for i in active if i["kind"] == "exam"),
-        "done": len(archive),
+        "done": sum(1 for i in archive if not i.get("expired") or i.get("done")),
     }
 
 

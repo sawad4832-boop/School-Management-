@@ -90,7 +90,7 @@ function renderStats() {
   const s = state.stats || {};
   el('stats').innerHTML = [
     statTile('Offen', s.open ?? 0),
-    statTile('Überfällig', s.overdue ?? 0, s.overdue ? 'text-red-600' : ''),
+    statTile('Abgelaufen', s.overdue ?? 0, s.overdue ? 'text-slate-500' : ''),
     statTile('Nächste 24 h', s.next24h ?? 0, s.next24h ? 'text-red-600' : ''),
     statTile('Nächste 48 h', s.next48h ?? 0, s.next48h ? 'text-amber-600' : ''),
     statTile('Tests', s.exams ?? 0, 'text-indigo-600'),
@@ -155,15 +155,19 @@ function archiveCard(item) {
   const badge = item.status === 'graded' ? 'bewertet' : 'abgegeben';
   const restore = fromSchulCloud
     ? `<span class="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[11px] text-emerald-700">${badge}</span>`
-    : '<button class="undo-btn shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium active:bg-slate-100">Zurückholen</button>';
+    : item.expired && !item.done
+      ? '<span class="shrink-0 rounded-full bg-slate-200 px-2 py-1 text-[11px] text-slate-600">abgelaufen</span>'
+      : '<button class="undo-btn shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium active:bg-slate-100">Zurückholen</button>';
 
   return `
   <li class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5" data-id="${escapeHtml(item.id)}">
-    <svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-emerald-600" fill="currentColor">
-      <path d="M7.6 13.2 4.4 10l-1.1 1.1 4.3 4.3 9-9-1.1-1.1z"/>
-    </svg>
+    ${item.expired && !item.done
+      ? '<span class="h-4 w-4 shrink-0 text-center text-xs text-slate-400">⌛</span>'
+      : `<svg viewBox="0 0 20 20" class="h-4 w-4 shrink-0 text-emerald-600" fill="currentColor">
+           <path d="M7.6 13.2 4.4 10l-1.1 1.1 4.3 4.3 9-9-1.1-1.1z"/>
+         </svg>`}
     <div class="min-w-0 flex-1">
-      <p class="truncate text-sm font-medium text-slate-600 line-through">${escapeHtml(item.title)}</p>
+      <p class="truncate text-sm font-medium text-slate-600 ${item.expired && !item.done ? '' : 'line-through'}">${escapeHtml(item.title)}</p>
       <p class="truncate text-xs text-slate-400">${escapeHtml(item.course)} · ${formatDue(item.due, true)}</p>
     </div>
     ${restore}
@@ -176,7 +180,7 @@ function visibleItems() {
     if (state.filter === 'homework' && item.kind !== 'homework') return false;
     if (state.filter === 'exam' && item.kind !== 'exam') return false;
     if (state.filter === 'urgent'
-        && !['overdue', 'critical', 'warning'].includes(item.urgency?.level)) return false;
+        && !['critical', 'warning'].includes(item.urgency?.level)) return false;
     if (state.course && item.course !== state.course) return false;
     if (q) {
       const haystack = `${item.title} ${item.course} ${item.description}`.toLowerCase();
@@ -264,6 +268,7 @@ function mergeLocalState(data) {
   const archive = [...(data.archive || [])];
   for (const item of data.active || []) {
     if (known.has(item.id)) archive.unshift({ ...item, done: true });
+    else if (item.urgency?.level === 'overdue') archive.push({ ...item, expired: true });
     else active.push(item);
   }
   return { ...data, active, archive, stats: computeStats(active, archive) };
@@ -274,11 +279,11 @@ function computeStats(active, archive) {
   const count = (level) => levels.filter((l) => l === level).length;
   return {
     open: active.length,
-    overdue: count('overdue'),
+    overdue: archive.filter((i) => i.expired && !i.done).length,
     next24h: count('critical'),
     next48h: count('critical') + count('warning'),
     exams: active.filter((i) => i.kind === 'exam').length,
-    done: archive.length,
+    done: archive.filter((i) => !i.expired || i.done).length,
   };
 }
 

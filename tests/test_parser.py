@@ -117,18 +117,28 @@ def test_lan_report_and_qr():
 # Ankuendigungen in Kursthemen
 # ----------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "text,has_date,expected",
+    "text,expected",
     [
-        ("Hausaufgabe: Fragen 1-3 beantworten", False, True),   # eindeutig
-        ("Am Freitag schreiben wir eine Klassenarbeit", False, True),
-        ("Bitte Seite 42 bearbeiten bis 12.09.2026", True, True),  # schwach + Datum
-        ("Bitte Seite 42 bearbeiten", False, False),               # schwach ohne Datum
-        ("Hier finden Sie die Folien der Stunde", False, False),   # reines Material
-        ("", False, False),
+        # Ausdrueckliche Ankuendigungen - die sollen rein
+        ("Hausaufgabe: Fragen 1-3 beantworten", True),
+        ("HA: Seite 42 Nr. 3", True),
+        ("Am Freitag schreiben wir einen Test", True),
+        ("Vokabeltest Unit 4", True),
+        ("Die Klassenarbeit ist am 20.09.", True),
+        ("Lernkontrolle nächste Woche", True),
+        ("Klausur zum Halbjahr", True),
+        # Unterrichtsstoff - der soll draussen bleiben, auch mit Datum
+        ("Aufgabe 3 bearbeiten", False),
+        ("Bitte Seite 42 lesen bis 12.09.2026", False),
+        ("Wir haben heute Aufgaben zur Photosynthese gemacht", False),
+        ("Material und Folien der Stunde", False),
+        ("Der Protest von 1968", False),      # "test" nur als Wortbestandteil
+        ("Wir haben viel geschafft", False),  # "ha" nur als Wortbestandteil
+        ("", False),
     ],
 )
-def test_is_announcement(text, has_date, expected):
-    assert parser.is_announcement(text, has_date) is expected
+def test_is_announcement_only_matches_homework_and_tests(text, expected):
+    assert parser.is_announcement(text) is expected
 
 
 def test_normalize_topic_reads_homework_from_course_topic():
@@ -171,7 +181,7 @@ def test_topic_does_not_duplicate_an_official_task():
                    "dueDate": "2026-09-12T12:00:00Z", "status": {}}],
         "topics": [
             {"id": "l9", "title": "Lesetagebuch Kapitel 1-4",
-             "text": "Abgabe bis 12.09.2026", "course_name": "Deutsch"},
+             "text": "Hausaufgabe bis 12.09.2026", "course_name": "Deutsch"},
             {"id": "l8", "title": "Vokabeltest Unit 4",
              "text": "Test am 15.09.2026", "course_name": "Englisch"},
         ],
@@ -182,3 +192,22 @@ def test_topic_does_not_duplicate_an_official_task():
     assert "hw:t1" in ids
     assert "tp:l9" not in ids     # Dublette
     assert "tp:l8" in ids         # eigenstaendige Ankuendigung
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Wir schreiben eine Arbeit", True),
+        ("Am Freitag schreiben wir eine Klassenarbeit", True),
+        ("Vokabeltest Unit 4", True),
+        # Wortgrenzen: diese Begriffe sind keine Leistungsnachweise
+        ("Der Text des Gedichts", False),      # frueher Treffer wegen "ex "
+        ("Ein komplexes Beispiel", False),
+        ("Index der Begriffe", False),
+        ("Der Protest von 1968", False),
+        ("Gruppenarbeit in der Stunde", False),
+        ("Arbeitsblatt bearbeiten", False),
+    ],
+)
+def test_is_exam_respects_word_boundaries(text, expected):
+    assert parser.is_exam(text) is expected

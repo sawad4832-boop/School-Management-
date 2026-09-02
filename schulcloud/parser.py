@@ -28,31 +28,52 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
-# Zwei Stufen von Stichwoertern fuer Ankuendigungen in Kursthemen:
-# STRONG genuegt allein, WEAK zaehlt nur zusammen mit einem Datum. Sonst
-# wuerde jedes Thema, in dem einmal "Seite" steht, in der Liste landen.
-STRONG_KEYWORDS = (
-    "klassenarbeit", "klausur", "leistungskontrolle", "lernkontrolle",
-    "vokabeltest", "pruefung", "prüfung", "diktat", "referat", "facharbeit",
-    "praesentation", "präsentation", "hausaufgabe", "hausaufgaben", "abgabe",
-    "abgeben", "abzugeben", "test schreiben", "arbeit schreiben",
+# Ein Kursthema kommt nur in die Liste, wenn dort ausdruecklich eine
+# Hausaufgabe oder ein Test steht. Woerter wie "Aufgabe", "bearbeiten" oder
+# "Seite" reichen bewusst NICHT - sonst landet der halbe Unterrichtsstoff darin.
+#
+# \b sorgt fuer Wortgrenzen: "HA" trifft nicht auf "haben" zu. Zusammen-
+# setzungen auf "-test" (Vokabeltest, Kurztest) sind gewollt, "Protest" nicht.
+ANNOUNCEMENT_RE = re.compile(
+    r"""(?xi)
+    \b hausaufgabe\w*  \b |
+    \b haus[- ]aufgabe\w* \b |
+    \b ha \b (?=\s*[:.\-–]|\s+bis|\s+f[uü]r) |   # "HA:" / "HA bis Freitag"
+    \b (?!pro) \w* test \w* \b |
+    \b klassenarbeit\w* \b |
+    \b klausur\w* \b |
+    \b (leistungs|lern) kontrolle\w* \b |
+    \b pr[uü]fung\w* \b |
+    \b diktat\w* \b |
+    \b arbeit \s+ schreiben \b |
+    \b schreiben \s+ (wir \s+)? (eine \s+)? \w* arbeit \b
+    """
 )
-WEAK_KEYWORDS = (
-    "bearbeiten", "lernen", "üben", "ueben", "wiederholen", "vorbereiten",
-    "mitbringen", "lesen", "aufgabe", "arbeitsblatt", "seite", "test",
-    "vortrag", "kolloquium", "hausarbeit", "schulaufgabe",
-)
-STRONG_RE = re.compile("|".join(re.escape(k) for k in STRONG_KEYWORDS), re.IGNORECASE)
-WEAK_RE = re.compile("|".join(re.escape(k) for k in WEAK_KEYWORDS), re.IGNORECASE)
 
-# Schluesselwoerter fuer Testankuendigungen / Leistungsnachweise.
-EXAM_KEYWORDS = (
-    "klassenarbeit", "klausur", "leistungskontrolle", "lernkontrolle", "lek",
-    "test", "vokabeltest", "pruefung", "prüfung", "abfrage", "diktat",
-    "referat", "praesentation", "präsentation", "vortrag", "kolloquium",
-    "arbeit schreiben", "schulaufgabe", "ex ", "hausarbeit", "facharbeit",
+# Erkennung von Leistungsnachweisen - fuer die Einstufung als "Test" und fuer
+# Kalender, Ankuendigungen und Kursthemen. Wortgrenzen sind hier Pflicht: eine
+# frueher enthaltene Abkuerzung "ex " traf auch auf "Text " zu.
+EXAM_RE = re.compile(
+    r"""(?xi)
+    \b (?!pro) \w* test \w* \b |
+    \b klassenarbeit\w* \b |
+    \b klausur\w* \b |
+    \b (leistungs|lern) kontrolle\w* \b |
+    \b lek \b |
+    \b pr[uü]fung\w* \b |
+    \b diktat\w* \b |
+    \b abfrage\w* \b |
+    \b referat\w* \b |
+    \b pr[äa]sentation\w* \b |
+    \b vortr[aä]g\w* \b |
+    \b kolloquium\w* \b |
+    \b facharbeit\w* \b |
+    \b hausarbeit\w* \b |
+    \b schulaufgabe\w* \b |
+    \b arbeit \s+ schreiben \b |
+    \b schreiben \s+ (wir \s+)? (eine \s+)? \w* arbeit \b
+    """
 )
-EXAM_RE = re.compile("|".join(re.escape(k) for k in EXAM_KEYWORDS), re.IGNORECASE)
 
 # Fristformulierungen in Freitexten ("Abgabe bis 12.09.2026, 18:00").
 DEADLINE_RE = re.compile(
@@ -141,13 +162,14 @@ def is_exam(*texts: Any) -> bool:
     return any(EXAM_RE.search(strip_html(t, 2000)) for t in texts if t)
 
 
-def is_announcement(text: str, has_date: bool) -> bool:
-    """Steckt in einem Kursthema eine Aufgaben- oder Testankuendigung?"""
-    if not text:
-        return False
-    if STRONG_RE.search(text):
-        return True
-    return has_date and bool(WEAK_RE.search(text))
+def is_announcement(text: str) -> bool:
+    """Steht im Kursthema ausdruecklich eine Hausaufgabe oder ein Test?
+
+    Absichtlich streng: nur die eindeutigen Woerter zaehlen, mit oder ohne
+    Datum. Unterrichtsstoff ("Aufgabe 3 bearbeiten", "Seite 42 lesen") bleibt
+    damit draussen.
+    """
+    return bool(text) and bool(ANNOUNCEMENT_RE.search(text))
 
 
 # ----------------------------------------------------------------------
@@ -275,9 +297,9 @@ def normalize_topic(topic: dict, base_url: str, source: str) -> Optional[dict]:
     if not haystack:
         return None
 
-    due = find_deadline_in_text(haystack)
-    if not is_announcement(haystack, due is not None):
+    if not is_announcement(haystack):
         return None
+    due = find_deadline_in_text(haystack)
 
     topic_id = topic.get("id") or _fallback_id(title, body[:80])
     return {
