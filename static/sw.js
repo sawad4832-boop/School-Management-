@@ -2,11 +2,10 @@
    Registriert wird er nur in sicheren Kontexten (HTTPS oder localhost) - im
    heimischen WLAN ueber http bleibt die Seite trotzdem nutzbar, dann greift
    der localStorage-Zwischenspeicher im Frontend. */
-const CACHE = 'sc-dashboard-v1';
+const CACHE = 'sc-dashboard-v2';
+// Bewusst ohne '/': die Seite selbst wird nur nach einem erfolgreichen Abruf
+// abgelegt. So kann nie altes HTML mit neuem Skript zusammentreffen.
 const SHELL = [
-  '/',
-  '/static/js/app.js',
-  '/static/css/tailwind.css',
   '/static/icons/icon-192.png',
   '/manifest.webmanifest',
 ];

@@ -112,3 +112,44 @@ def test_checkmark_survives_restart_with_empty_storage(tmp_path):
             browser.close()
     finally:
         server.terminate()
+
+
+def test_page_never_stays_blank_when_markup_is_stale(tmp_path):
+    """Aelteres HTML (aus dem Browser-Zwischenspeicher) + neues Skript.
+
+    Frueher brach der Start am ersten fehlenden Element ab und der Nutzer sah
+    eine komplett leere Seite. Jetzt muss mindestens die Anmeldung erscheinen.
+    """
+    browser_path = _chromium_path()
+    if not browser_path:
+        pytest.skip("Kein Chromium gefunden")
+
+    server = _start_server(str(tmp_path / "stale.sqlite3"))
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(executable_path=browser_path)
+            page = browser.new_context(**p.devices["iPhone 13"]).new_page()
+
+            def strip_pin_form(route):
+                response = route.fetch()
+                body = response.text()
+                start = body.index('<form id="pin-form"')
+                end = body.index("</form>", start) + len("</form>")
+                route.fulfill(response=response, body=body[:start] + body[end:])
+
+            page.route(f"{URL}/", strip_pin_form)
+            page.goto(URL, wait_until="networkidle")
+            page.wait_for_timeout(800)
+
+            assert page.locator("#pin-form").count() == 0        # Element fehlt wirklich
+            assert page.locator("#login-view").is_visible()      # trotzdem bedienbar
+            assert page.locator("#btn-demo").is_visible()
+
+            # Und die Anmeldung funktioniert weiterhin
+            page.tap("#btn-demo")
+            page.wait_for_selector("#active-list li")
+            assert page.locator("#active-list li").count() > 0
+
+            browser.close()
+    finally:
+        server.terminate()

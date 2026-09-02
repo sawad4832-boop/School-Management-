@@ -15,6 +15,27 @@ const state = {
 
 const el = (id) => document.getElementById(id);
 
+/* Registriert einen Handler nur, wenn es das Element gibt. Fehlt eines (etwa
+   weil der Browser eine aeltere Fassung der Seite zwischengespeichert hat),
+   darf das nicht den ganzen Start abbrechen. */
+function on(id, event, handler) {
+  const node = el(id);
+  if (node) node.addEventListener(event, handler);
+  else console.warn('Element fehlt:', id);
+}
+
+/* Sichtbare Fehlermeldung - besser als eine leere Seite. */
+function showFatal(message) {
+  const box = el('fatal');
+  if (!box) return;
+  el('fatal-text').textContent = message;
+  box.classList.remove('hidden');
+}
+
+window.addEventListener('error', (e) => showFatal(e.message || 'Unbekannter Fehler'));
+window.addEventListener('unhandledrejection', (e) =>
+  showFatal((e.reason && e.reason.message) || 'Unbekannter Fehler'));
+
 const api = async (path, options = {}) => {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
@@ -314,6 +335,7 @@ function toast(message, undoAction) {
 /* ------------------------------------------------------------------- Aktionen */
 
 function showDashboard(status) {
+  setBooting(false);
   el('pin-view').classList.add('hidden');
   el('login-view').classList.add('hidden');
   el('dash-view').classList.remove('hidden');
@@ -323,6 +345,7 @@ function showDashboard(status) {
 }
 
 function showPin() {
+  setBooting(false);
   el('dash-view').classList.add('hidden');
   el('login-view').classList.add('hidden');
   el('pin-view').classList.remove('hidden');
@@ -332,6 +355,7 @@ function showPin() {
 }
 
 function showLogin() {
+  setBooting(false);
   el('pin-view').classList.add('hidden');
   el('dash-view').classList.add('hidden');
   el('login-view').classList.remove('hidden');
@@ -396,8 +420,24 @@ async function login(payload) {
 
 /* --------------------------------------------------------------- Event-Bindung */
 
-document.addEventListener('DOMContentLoaded', async () => {
-  el('login-form').addEventListener('submit', (event) => {
+document.addEventListener('DOMContentLoaded', () => {
+  start().catch((err) => {
+    showLogin();                       // irgendetwas ist immer sichtbar
+    showFatal('Start fehlgeschlagen: ' + (err.message || err));
+  });
+});
+
+function setBooting(active) {
+  const boot = el('booting');
+  const login = el('login-view');
+  if (boot) boot.classList.toggle('hidden', !active);
+  // Waehrend der Pruefung nicht die Anmeldung zeigen - sie koennte unnoetig sein.
+  if (login && active) login.classList.add('hidden');
+}
+
+async function start() {
+  setBooting(true);
+  on('login-form', 'submit', (event) => {
     event.preventDefault();
     login({
       username: el('username').value,
@@ -406,7 +446,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  el('pin-form').addEventListener('submit', async (event) => {
+  on('pin-form', 'submit', async (event) => {
     event.preventDefault();
     const error = el('pin-error');
     error.classList.add('hidden');
@@ -426,33 +466,34 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  el('btn-demo').addEventListener('click', () => login({ demo: true }));
-  el('btn-refresh').addEventListener('click', () => refresh());
+  on('btn-demo', 'click', () => login({ demo: true }));
+  on('btn-refresh', 'click', () => refresh());
 
-  el('btn-logout').addEventListener('click', async () => {
+  on('btn-logout', 'click', async () => {
     await api('/api/logout', { method: 'POST' }).catch(() => {});
     showLogin();
   });
 
-  el('search').addEventListener('input', (e) => { state.search = e.target.value; render(); });
-  el('course-filter').addEventListener('change', (e) => { state.course = e.target.value; render(); });
+  on('search', 'input', (e) => { state.search = e.target.value; render(); });
+  on('course-filter', 'change', (e) => { state.course = e.target.value; render(); });
 
   document.querySelectorAll('.filter-btn').forEach((btn) => {
     btn.addEventListener('click', () => { state.filter = btn.dataset.filter; render(); });
   });
 
-  el('toggle-archive').addEventListener('click', () => {
-    el('archive-list').classList.toggle('hidden');
+  on('toggle-archive', 'click', () => {
+    const list = el('archive-list');
+    if (list) list.classList.toggle('hidden');
   });
 
-  el('active-list').addEventListener('click', (event) => {
+  on('active-list', 'click', (event) => {
     const btn = event.target.closest('.check-btn');
     if (!btn) return;
     event.preventDefault();
     setDone(btn.closest('li').dataset.id, true);
   });
 
-  el('archive-list').addEventListener('click', (event) => {
+  on('archive-list', 'click', (event) => {
     const btn = event.target.closest('.undo-btn');
     if (btn) setDone(btn.closest('li').dataset.id, false);
   });
@@ -468,19 +509,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       showLogin();
     }
-  } catch (_) {
+  } catch (err) {
     // Offline: letzte bekannte Liste zeigen, statt eine leere Seite
     if (loadOffline()) {
       showDashboard({ user: 'Offline – letzter Stand' });
       toast('Keine Verbindung – letzter gespeicherter Stand');
     } else {
       showLogin();
+      showFatal('Keine Verbindung zum Server: ' + err.message);
     }
   }
 
   // Beim Zurueckwechseln zur App aktualisieren (typisch auf dem Handy)
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && !el('dash-view').classList.contains('hidden')) {
+    const dash = el('dash-view');
+    if (document.visibilityState === 'visible' && dash && !dash.classList.contains('hidden')) {
       refresh(true);
     }
   });
@@ -488,7 +531,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const minutes = window.APP_CONFIG.refreshMinutes;
   if (minutes > 0) {
     setInterval(() => {
-      if (!el('dash-view').classList.contains('hidden') && document.visibilityState === 'visible') {
+      const view = el('dash-view');
+      if (view && !view.classList.contains('hidden') && document.visibilityState === 'visible') {
         refresh(true);
       }
     }, minutes * 60000);
@@ -498,4 +542,4 @@ document.addEventListener('DOMContentLoaded', async () => {
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   }
-});
+}

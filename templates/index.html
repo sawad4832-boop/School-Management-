@@ -15,7 +15,7 @@
   <link rel="icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
 
   {% if local_css %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tailwind.css') }}?v={{ asset_version }}">
   {% else %}
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -101,8 +101,24 @@
       </div>
     </section>
 
-    <!-- Login -->
-    <section id="login-view" class="hidden">
+    <!-- Wird sofort per JavaScript gezeigt und wieder entfernt, sobald klar ist,
+         was angezeigt gehoert. Ohne JavaScript bleibt es unsichtbar und die
+         Anmeldung steht da. -->
+    <div id="booting" class="hidden py-16 text-center">
+      <div class="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-ink"></div>
+      <p class="mt-3 text-sm text-slate-500">Verbindung wird geprüft …</p>
+      <p class="mt-1 text-xs text-slate-400">Nach einer Pause braucht der Server bis zu einer Minute.</p>
+    </div>
+
+    <!-- Fehleranzeige (statt einer leeren Seite) -->
+    <div id="fatal" class="mb-4 hidden rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+      <p class="font-semibold">Die Seite konnte nicht vollständig geladen werden.</p>
+      <p id="fatal-text" class="mt-1 break-words font-mono text-xs"></p>
+      <p class="mt-2">Hilft meist: Seite neu laden. Bleibt es dabei, schick diesen Text weiter.</p>
+    </div>
+
+    <!-- Login: sichtbarer Ausgangszustand, damit nie eine leere Seite erscheint -->
+    <section id="login-view">
       <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 class="text-lg font-semibold">Mit der Schul-Cloud verbinden</h2>
         <p class="mt-1 text-sm text-slate-500">
@@ -213,6 +229,6 @@
     refreshMinutes: {{ refresh_minutes }},
   };
 </script>
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}?v={{ asset_version }}"></script>
 </body>
 </html>

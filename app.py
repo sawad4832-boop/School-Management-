@@ -316,6 +316,24 @@ def _local_css_path() -> Path:
     return Path(app.static_folder) / "css" / "tailwind.css"
 
 
+def asset_version() -> str:
+    """Kennung der ausgelieferten Oberflaeche.
+
+    Haengt an den Adressen von Skript und Stylesheet. Dadurch laedt ein Browser
+    nach einer neuen Fassung garantiert beide neu - sonst kann altes HTML auf
+    neues JavaScript treffen (oder umgekehrt), und die Seite bleibt leer.
+    """
+    stamps = []
+    for path in (
+        Path(app.template_folder) / "index.html",
+        Path(app.static_folder) / "js" / "app.js",
+        _local_css_path(),
+    ):
+        if path.is_file():
+            stamps.append(str(int(path.stat().st_mtime)))
+    return hashlib.sha256("|".join(stamps).encode()).hexdigest()[:8]
+
+
 def warn_if_css_outdated() -> Optional[str]:
     """Meldet einen Tailwind-Build, der aelter als Template oder Skript ist.
 
@@ -347,6 +365,7 @@ def index():
         demo_mode=DEMO_MODE,
         refresh_minutes=REFRESH_MINUTES,
         local_css=local_css,
+        asset_version=asset_version(),
     )
 
 

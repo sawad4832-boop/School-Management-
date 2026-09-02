@@ -243,3 +243,23 @@ def test_submitted_tasks_leave_the_todo_list(client):
     assert all(i["status"] == "open" for i in data["active"])
     archived = {i["status"] for i in data["archive"]}
     assert "submitted" in archived and "graded" in archived
+
+
+def test_asset_version_changes_with_the_interface(client):
+    """Skript- und HTML-Adresse tragen eine Kennung, damit beide zusammenpassen."""
+    import os
+    import time
+
+    import app as app_module
+
+    body = client.get("/").get_data(as_text=True)
+    version = app_module.asset_version()
+    assert f"app.js?v={version}" in body
+
+    script = os.path.join(app_module.app.static_folder, "js", "app.js")
+    original = os.stat(script).st_mtime
+    try:
+        os.utime(script, (original + 60, original + 60))
+        assert app_module.asset_version() != version
+    finally:
+        os.utime(script, (original, original))
